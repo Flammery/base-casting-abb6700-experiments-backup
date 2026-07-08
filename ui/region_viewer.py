@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -35,6 +36,42 @@ PALETTE = [
     (118, 174, 224),
     (196, 116, 164),
 ]
+
+
+def manual_manifest_path_for(project_path: Path) -> Path:
+    name = project_path.name
+    stem = name[: -len(".rsp.json")] if name.endswith(".rsp.json") else project_path.stem
+    return project_path.with_name(f"{stem}_manifest.json")
+
+
+def point_in_polygon_xy(point: tuple[float, float], polygon: list[list[float]]) -> bool:
+    x, y = point
+    inside = False
+    previous = polygon[-1]
+    for current in polygon:
+        yi, yj = current[1], previous[1]
+        xi, xj = current[0], previous[0]
+        if (yi > y) != (yj > y):
+            cross_x = (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi
+            if x < cross_x:
+                inside = not inside
+        previous = current
+    return inside
+
+
+def cell_centroid_xy(polydata, cell_id: int) -> tuple[float, float]:
+    cell = polydata.GetCell(cell_id)
+    point_ids = cell.GetPointIds()
+    count = point_ids.GetNumberOfIds()
+    if count <= 0:
+        return (0.0, 0.0)
+    x_sum = 0.0
+    y_sum = 0.0
+    for index in range(count):
+        point = polydata.GetPoint(point_ids.GetId(index))
+        x_sum += float(point[0])
+        y_sum += float(point[1])
+    return (x_sum / count, y_sum / count)
 
 
 class RegionPreview(QWidget):
@@ -79,9 +116,17 @@ class RegionPreview(QWidget):
             reader.Update()
             polydata = reader.GetOutput()
             regions = [set(region) for region in project.selected_path_face_regions]
-            self._apply_region_colors(polydata, regions)
+            clip_patches = self._manual_clip_patches(project_path, regions)
+            if clip_patches:
+                self._apply_clip_patch_colors(polydata, clip_patches)
+                labels = ",".join(str(patch["label"]) for patch in clip_patches[:6])
+                suffix = "..." if len(clip_patches) > 6 else ""
+                message = f"{project_path.name} | regions: {len(regions)} | manual patches: {len(clip_patches)} ({labels}{suffix})"
+            else:
+                self._apply_region_colors(polydata, regions)
+                message = f"{project_path.name} | regions: {len(regions)}"
             self._show_polydata(reader)
-            self.set_message(f"{project_path.name} | regions: {len(regions)}")
+            self.set_message(message)
         except Exception as exc:
             self.set_message(f"预览加载失败: {exc}")
 
@@ -104,6 +149,41 @@ class RegionPreview(QWidget):
         self.renderer.ResetCamera()
         self.vtk_widget.GetRenderWindow().Render()
 
+    def _manual_clip_patches(self, project_path: Path, regions: list[set[int]]) -> list[dict]:
+        manifest_path = manual_manifest_path_for(project_path)
+        if not manifest_path.exists():
+            return []
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        if manifest.get("schema") != "base_casting_abb6700.manual_region_partition_manifest":
+            return []
+
+        patches: list[dict] = []
+        patched_sources: set[int] = set()
+        for record in manifest.get("records", []):
+            source_region = int(record.get("original_region", 0))
+            if source_region <= 0 or source_region > len(regions):
+                continue
+            patched_sources.add(source_region)
+            for patch in record.get("patches", []):
+                polygon = patch.get("clip_polygon")
+                if not polygon:
+                    continue
+                patches.append(
+                    {
+                        "source_region": source_region,
+                        "label": str(patch.get("label", f"{source_region}_1")),
+                        "face_ids": set(regions[source_region - 1]),
+                        "clip_polygon": polygon,
+                    }
+                )
+        for index, region in enumerate(regions, 1):
+            if index not in patched_sources:
+                patches.append({"source_region": index, "label": str(index), "face_ids": region, "clip_polygon": None})
+        return patches
+
     def _apply_region_colors(self, polydata, regions: list[set[int]]) -> None:
         cell_count = polydata.GetNumberOfCells()
         colors = vtkUnsignedCharArray()
@@ -116,5 +196,27 @@ class RegionPreview(QWidget):
                 face_to_color[int(face_id)] = color
         for cell_id in range(cell_count):
             colors.InsertNextTypedTuple(face_to_color.get(cell_id, DEFAULT_COLOR))
+        polydata.GetCellData().SetScalars(colors)
+        polydata.Modified()
+
+    def _apply_clip_patch_colors(self, polydata, patches: list[dict]) -> None:
+        cell_count = polydata.GetNumberOfCells()
+        colors = vtkUnsignedCharArray()
+        colors.SetNumberOfComponents(3)
+        colors.SetName("RegionColors")
+        patch_colors = [PALETTE[index % len(PALETTE)] for index in range(len(patches))]
+
+        # `.rsp` 里仍保留原始 region；这里按 manifest 的规则 UV clip polygon 给三角面临时上色，方便检查分区效果。
+        for cell_id in range(cell_count):
+            centroid = cell_centroid_xy(polydata, cell_id)
+            color = DEFAULT_COLOR
+            for patch_index, patch in enumerate(patches):
+                if cell_id not in patch["face_ids"]:
+                    continue
+                polygon = patch.get("clip_polygon")
+                if polygon is None or point_in_polygon_xy(centroid, polygon):
+                    color = patch_colors[patch_index]
+                    break
+            colors.InsertNextTypedTuple(color)
         polydata.GetCellData().SetScalars(colors)
         polydata.Modified()

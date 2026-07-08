@@ -34,8 +34,18 @@ from robot_studio_qt.cad.mesh_io import create_mesh_reader  # noqa: E402
 from robot_studio_qt.path_planning.mesh_raster import read_triangles  # noqa: E402
 from robot_studio_qt.project import load_project_file, save_project_file  # noqa: E402
 
-from manual_region_partitioning import BarrierLine, manual_clip_manifest_records  # noqa: E402
+from manual_region_partitioning import BarrierLine, clip_partitions_from_barriers, manual_clip_manifest_records  # noqa: E402
 from region_partitioning import face_geometries_from_triangles  # noqa: E402
+
+
+PREVIEW_COLORS = [
+    QColor(242, 156, 30, 110),
+    QColor(44, 160, 207, 110),
+    QColor(94, 190, 112, 110),
+    QColor(218, 92, 112, 110),
+    QColor(156, 118, 217, 110),
+    QColor(224, 196, 74, 110),
+]
 
 
 def manual_manifest_path_for(output_path: Path) -> Path:
@@ -78,7 +88,14 @@ class BarrierView(QGraphicsView):
             super().mousePressEvent(event)
             return
         self._start = self.mapToScene(event.position().toPoint())
-        self._rubber_line = self.scene().addLine(self._start.x(), self._start.y(), self._start.x(), self._start.y(), QPen(QColor(255, 230, 0), 5))
+        self._rubber_line = self.scene().addLine(
+            self._start.x(),
+            self._start.y(),
+            self._start.x(),
+            self._start.y(),
+            QPen(QColor(255, 230, 0), 5),
+        )
+        self._rubber_line.setZValue(30)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         if self._draw_mode and self._start is not None and self._rubber_line is not None:
@@ -93,9 +110,10 @@ class BarrierView(QGraphicsView):
             return
         end = self.mapToScene(event.position().toPoint())
         start = self._start
-        self._rubber_line.setLine(start.x(), start.y(), end.x(), end.y())
+        rubber_line = self._rubber_line
         self._rubber_line = None
         self._start = None
+        self.scene().removeItem(rubber_line)
         if (start - end).manhattanLength() > 1.0:
             self.barrier_drawn.emit((model_xy_from_scene_point(start), model_xy_from_scene_point(end)))
 
@@ -110,6 +128,8 @@ class ManualPartitionDialog(QDialog):
         self.selected_regions = set(selected_regions)
         self.barriers: list[BarrierLine] = []
         self._line_items: list[QGraphicsLineItem] = []
+        self._partition_items: list[QGraphicsPolygonItem] = []
+        self._region_faces: dict[int, set[int]] = {}
 
         self.scene = QGraphicsScene(self)
         self.scene.setBackgroundBrush(QBrush(QColor(8, 10, 12)))
@@ -159,12 +179,19 @@ class ManualPartitionDialog(QDialog):
             if region_index in self.selected_regions
             for face_id in region
         }
+        self._region_faces = {
+            region_index: {int(face_id) for face_id in region}
+            for region_index, region in enumerate(project.selected_path_face_regions, 1)
+            if region_index in self.selected_regions
+        }
+
         importer = CadImportService().import_model(project.workpiece.file_path)
         reader = create_mesh_reader(importer.display_path, importer.display_format)
         reader.SetFileName(str(importer.display_path))
         reader.Update()
         triangles = read_triangles(reader.GetOutput(), selected_face_ids)
         self._triangles = triangles
+        self._faces = face_geometries_from_triangles(triangles)
 
         fill = QBrush(QColor(225, 232, 238))
         edge = QPen(QColor(88, 96, 104), 0.8)
@@ -174,6 +201,7 @@ class ManualPartitionDialog(QDialog):
             item = QGraphicsPolygonItem(polygon)
             item.setBrush(fill)
             item.setPen(edge)
+            item.setZValue(0)
             self.scene.addItem(item)
             bounds = polygon.boundingRect() if bounds is None else bounds.united(polygon.boundingRect())
 
@@ -189,15 +217,41 @@ class ManualPartitionDialog(QDialog):
         start_scene = scene_point_from_model_xy(start)
         end_scene = scene_point_from_model_xy(end)
         item = self.scene.addLine(start_scene.x(), start_scene.y(), end_scene.x(), end_scene.y(), QPen(QColor(255, 230, 0), 6))
-        item.setZValue(10)
+        item.setZValue(30)
         self._line_items.append(item)
-        self.hint.setText(f"已添加 {len(self.barriers)} 条分割线。继续拉线或点击“拉线并应用”。")
+        self._refresh_partition_preview()
+        self.hint.setText(f"已添加 {len(self.barriers)} 条分割线，当前预览为 {self._preview_patch_count()} 个分区。继续拉线或点击“拉线并应用”。")
+
+    def _preview_patch_count(self) -> int:
+        return sum(len(clip_partitions_from_barriers(region_index, face_ids, self._faces, self.barriers)) for region_index, face_ids in self._region_faces.items())
+
+    def _refresh_partition_preview(self) -> None:
+        for item in self._partition_items:
+            self.scene.removeItem(item)
+        self._partition_items.clear()
+        if not self.barriers:
+            return
+
+        color_index = 0
+        for region_index, face_ids in sorted(self._region_faces.items()):
+            # 这里显示的是规则 UV 裁剪区域，不按稀疏三角面重新拆面；后续轨迹采样也会按这些 clip polygon 过滤点。
+            partitions = clip_partitions_from_barriers(region_index, face_ids, self._faces, self.barriers)
+            for partition in partitions:
+                polygon = QPolygonF([scene_point_from_model_xy(point) for point in partition.clip_polygon_model_xy])
+                item = QGraphicsPolygonItem(polygon)
+                item.setBrush(QBrush(PREVIEW_COLORS[color_index % len(PREVIEW_COLORS)]))
+                item.setPen(QPen(QColor(235, 240, 245, 180), 1.2))
+                item.setZValue(10)
+                self.scene.addItem(item)
+                self._partition_items.append(item)
+                color_index += 1
 
     def _clear_barriers(self) -> None:
         self.barriers.clear()
         for item in self._line_items:
             self.scene.removeItem(item)
         self._line_items.clear()
+        self._refresh_partition_preview()
         self.hint.setText("已清空分割线。")
 
     def _apply(self) -> None:
@@ -206,8 +260,7 @@ class ManualPartitionDialog(QDialog):
             return
         try:
             project = load_project_file(self.input_path)
-            faces = face_geometries_from_triangles(self._triangles)
-            records = manual_clip_manifest_records(project.selected_path_face_regions, self.selected_regions, faces, self.barriers)
+            records = manual_clip_manifest_records(project.selected_path_face_regions, self.selected_regions, self._faces, self.barriers)
             output_project = deepcopy(project)
             save_project_file(self.output_path, output_project)
             manifest = {
