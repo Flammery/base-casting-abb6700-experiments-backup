@@ -379,6 +379,8 @@ def write_points_csv(path_file: Path, motion_waypoints) -> None:
 def normalize_tool_load(row: dict) -> None:
     # RobotStudio 不接受完全未定义载荷；这里给实验用占位载荷，真实项目可替换为实测 tooldata。
     for key in ("module", "txt"):
+        if not row.get(key):
+            continue
         path = Path(row[key])
         text = path.read_text(encoding="utf-8")
         text = text.replace("[1,[0,0,0],[1,0,0,0],0,0,0]", RAPID_LOAD_PLACEHOLDER)
@@ -407,6 +409,11 @@ def pose_file_label(model_x: float, model_y: float, model_z: float, angle: int, 
 
 def rapid_module_name(region_index: int) -> str:
     return f"MODULE_R{region_index:02d}"
+
+
+def safe_region_label(label: str) -> str:
+    cleaned = "".join(character if character.isalnum() or character in {"_", "-"} else "_" for character in str(label).strip())
+    return cleaned or "region"
 
 
 def stable_sign(axis: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -584,30 +591,28 @@ def plan_region_uv(
     return PathResult(PathSource.MESH, placement.name or "wobj0", settings, waypoints, f"Generated {len(waypoints)} UV {feed_variant.value} raster waypoints.")
 
 
-def export_path_variant(project, placement, path, angle: int, region_index: int, variant: str) -> dict:
+def export_path_variant(project, placement, path, angle: int, region_index: int, variant: str, region_label: str | None = None) -> dict:
     # 每个 region、每个角度、每个进给变体独立保存，便于 RobotStudio 单独验证。
     motion = build_motion(placement, path)
-    folder = OUTDIR / f"rz{angle:03d}" / f"region{region_index:02d}" / variant
+    label = safe_region_label(region_label or f"{region_index}")
+    folder = OUTDIR / f"rz{angle:03d}" / label / variant
     folder.mkdir(parents=True, exist_ok=True)
     module_name = rapid_module_name(region_index)
-    file_stem = pose_file_label(MODEL_X, MODEL_Y, MODEL_Z, angle, region_index)
+    file_stem = label
     rapid = rapid_text(module_name, placement, project.polishing_tool, path, motion)
-    mod_path = folder / f"{file_stem}.mod"
     txt_path = folder / f"{file_stem}.txt"
-    csv_path = folder / f"{file_stem}_points.csv"
-    mod_path.write_text(rapid, encoding="utf-8")
     txt_path.write_text(rapid, encoding="utf-8")
-    write_points_csv(csv_path, motion)
     row = {
         "angle_deg": angle,
         "region": region_index,
+        "region_label": label,
         "feed_variant": variant,
         "targets": len(motion),
         "negative_y_targets": sum(1 for waypoint in motion if waypoint.position_world[1] < 0.0),
         "nonnegative_y_targets": sum(1 for waypoint in motion if waypoint.position_world[1] >= 0.0),
-        "module": str(mod_path),
+        "module": "",
         "txt": str(txt_path),
-        "points_csv": str(csv_path),
+        "points_csv": "",
         "orientation_mode": ORIENTATION_MODE,
         "axis_mode": AXIS_MODE,
     }
@@ -702,8 +707,7 @@ def main() -> None:
                         planning_region.get("exclude_polygons"),
                     )
                     if path.waypoints:
-                        row = export_path_variant(project, placement, path, angle, region_index, variant_name)
-                        row["region_label"] = region_label
+                        row = export_path_variant(project, placement, path, angle, region_index, variant_name, region_label)
                         row["source_region"] = planning_region["source_region"]
                         export_rows.append(row)
                     else:

@@ -82,12 +82,12 @@ def enrich_candidate_row(model_y: float, angle: int, row: dict, path: base.PathR
 def best_record_row(best_row: dict) -> dict:
     copied = optimal.copy_optimal_files(best_row, OPTIMAL_DIR)
     row = dict(best_row)
-    row["source_module"] = best_row["module"]
+    row["source_module"] = best_row.get("module", "")
     row["source_txt"] = best_row["txt"]
-    row["source_points_csv"] = best_row["points_csv"]
-    row["module"] = copied["module"]
+    row["source_points_csv"] = best_row.get("points_csv", "")
+    row["module"] = copied.get("module", "")
     row["txt"] = copied["txt"]
-    row["points_csv"] = copied["points_csv"]
+    row["points_csv"] = copied.get("points_csv", "")
     return row
 
 

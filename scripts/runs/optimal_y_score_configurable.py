@@ -373,8 +373,7 @@ def run_optimal_scan(
                         planning_region.get("exclude_polygons"),
                     )
                     if path.waypoints:
-                        row = runner.base.export_path_variant(project, placement, path, angle, region_index, variant_name)
-                        row["region_label"] = planning_region["label"]
+                        row = runner.base.export_path_variant(project, placement, path, angle, region_index, variant_name, planning_region["label"])
                         row["source_region"] = planning_region["source_region"]
                         candidate_rows.append(enrich_candidate_row(model_x, model_y, model_z, angle, row, path))
                     else:

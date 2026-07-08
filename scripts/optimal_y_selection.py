@@ -39,12 +39,16 @@ def choose_best_by_region(candidate_rows: Iterable[dict]) -> list[dict]:
 
 def copy_optimal_files(best_row: dict, optimal_dir: Path) -> dict[str, str]:
     region = int(best_row["region"])
-    destination = optimal_dir / f"region{region:02d}"
+    label = str(best_row.get("region_label", f"{region}")).strip() or f"{region}"
+    destination = optimal_dir / label
     destination.mkdir(parents=True, exist_ok=True)
 
     copied: dict[str, str] = {}
-    for key in ("module", "txt", "points_csv"):
-        source = Path(best_row[key])
+    for key in ("txt",):
+        source_value = best_row.get(key)
+        if not source_value:
+            continue
+        source = Path(source_value)
         target = destination / source.name
         shutil.copy2(source, target)
         copied[key] = str(target)

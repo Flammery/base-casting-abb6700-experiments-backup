@@ -54,3 +54,10 @@ def test_pose_file_label_uses_pose_and_region_only() -> None:
     module = _load_script_module()
 
     assert module.pose_file_label(3500, -1000, 440, 0, 7) == "x3500_yM1000_z440_rz000_R07"
+
+
+def test_safe_region_label_keeps_manual_partition_name() -> None:
+    module = _load_script_module()
+
+    assert module.safe_region_label("1_1") == "1_1"
+    assert module.safe_region_label("13 2") == "13_2"
