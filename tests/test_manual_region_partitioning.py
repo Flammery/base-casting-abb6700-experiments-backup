@@ -87,6 +87,30 @@ def test_clip_partitions_keep_source_region_labels() -> None:
 
     assert [partition.label for partition in partitions] == ["6_1", "6_2", "6_3"]
     assert all(len(partition.clip_polygon_model_xy) >= 3 for partition in partitions)
+    assert any(partition.exclude_polygons_model_xy for partition in partitions)
+
+
+def test_clip_partition_uses_projected_face_boundary_not_bbox() -> None:
+    manual = _load_manual_module()
+    partitioning = _load_partitioning_module()
+    triangles = [
+        *_rect(10, 0.0, 60.0, 0.0, 100.0),
+        *_rect(12, 60.0, 300.0, 0.0, 100.0),
+        *_rect(11, 0.0, 60.0, 100.0, 180.0),
+    ]
+    faces = partitioning.face_geometries_from_triangles(triangles)
+
+    partitions = manual.clip_partitions_from_barriers(
+        6,
+        {10, 11},
+        faces,
+        [((70.0, 20.0), (70.0, 160.0))],
+    )
+
+    side = min(partitions, key=lambda partition: sum(point[0] for point in partition.clip_polygon_model_xy) / len(partition.clip_polygon_model_xy))
+    assert (60.0, 100.0) in side.clip_polygon_model_xy
+    assert (0.0, 180.0) in side.clip_polygon_model_xy
+    assert all(point[0] <= 70.0 for point in side.clip_polygon_model_xy)
 
 
 def test_manual_clip_manifest_records_do_not_renumber_following_regions() -> None:

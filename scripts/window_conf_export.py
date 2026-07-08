@@ -109,6 +109,16 @@ def point_in_polygon_xy(point: tuple[float, float], polygon: list[list[float]]) 
     return inside
 
 
+def point_allowed_by_clip(
+    point: tuple[float, float],
+    clip_polygon: list[list[float]] | None,
+    exclude_polygons: list[list[list[float]]] | None = None,
+) -> bool:
+    if clip_polygon and not point_in_polygon_xy(point, clip_polygon):
+        return False
+    return not any(point_in_polygon_xy(point, polygon) for polygon in (exclude_polygons or []))
+
+
 def manual_clip_regions(project_path: Path, regions: list[set[int]]) -> list[dict]:
     manifest_path = partition_manifest_path_for(project_path)
     if not manifest_path.exists():
@@ -118,6 +128,7 @@ def manual_clip_regions(project_path: Path, regions: list[set[int]]) -> list[dic
                 "label": str(index),
                 "face_ids": region,
                 "clip_polygon": None,
+                "exclude_polygons": [],
             }
             for index, region in enumerate(regions, 1)
         ]
@@ -132,6 +143,7 @@ def manual_clip_regions(project_path: Path, regions: list[set[int]]) -> list[dic
                 "label": str(index),
                 "face_ids": region,
                 "clip_polygon": None,
+                "exclude_polygons": [],
             }
             for index, region in enumerate(regions, 1)
         ]
@@ -150,12 +162,13 @@ def manual_clip_regions(project_path: Path, regions: list[set[int]]) -> list[dic
                     "label": str(patch.get("label", f"{source_region}_1")),
                     "face_ids": set(regions[source_region - 1]),
                     "clip_polygon": patch.get("clip_polygon"),
+                    "exclude_polygons": patch.get("exclude_polygons") or [],
                 }
             )
     for index, region in enumerate(regions, 1):
         if index in patched_sources:
             continue
-        clip_regions.append({"source_region": index, "label": str(index), "face_ids": region, "clip_polygon": None})
+        clip_regions.append({"source_region": index, "label": str(index), "face_ids": region, "clip_polygon": None, "exclude_polygons": []})
     return clip_regions
 
 
@@ -194,14 +207,19 @@ def region_vertices_by_id(polydata, regions: list[set[int]]) -> dict[int, list[t
     return by_region
 
 
-def clip_region_vertices(polydata, face_ids: set[int], clip_polygon: list[list[float]] | None) -> list[tuple[float, float, float]]:
+def clip_region_vertices(
+    polydata,
+    face_ids: set[int],
+    clip_polygon: list[list[float]] | None,
+    exclude_polygons: list[list[list[float]]] | None = None,
+) -> list[tuple[float, float, float]]:
     vertices: list[tuple[float, float, float]] = []
     for triangle in read_triangles(polydata, face_ids):
         centroid = (
             sum(point[0] for point in triangle.points) / 3.0,
             sum(point[1] for point in triangle.points) / 3.0,
         )
-        if clip_polygon and not point_in_polygon_xy(centroid, clip_polygon):
+        if not point_allowed_by_clip(centroid, clip_polygon, exclude_polygons):
             continue
         vertices.extend(triangle.points)
     return vertices
@@ -516,6 +534,7 @@ def plan_region_uv(
     region: set[int],
     feed_variant: RasterFeedDirection,
     clip_polygon: list[list[float]] | None = None,
+    exclude_polygons: list[list[list[float]]] | None = None,
 ) -> PathResult:
     # 对单个 region 独立生成光栅路径，路径姿态由 base_y_aligned 统一决定。
     triangles = read_triangles(polydata, region)
@@ -533,8 +552,8 @@ def plan_region_uv(
     settings = replace(base_settings, feed_direction=feed_variant)
     projected = [project_triangle(triangle, origin, u_axis, v_axis) for triangle in triangles]
     samples = sample_projected_mesh(projected, settings)
-    if clip_polygon:
-        samples = [sample for sample in samples if point_in_polygon_xy((sample[3][0], sample[3][1]), clip_polygon)]
+    if clip_polygon or exclude_polygons:
+        samples = [sample for sample in samples if point_allowed_by_clip((sample[3][0], sample[3][1]), clip_polygon, exclude_polygons)]
     if not samples:
         return PathResult(PathSource.MESH, placement.name, settings, message="No raster samples were generated.")
 
@@ -643,7 +662,7 @@ def main() -> None:
         tool_name=project.polishing_tool.name,
     )
     vertices_by_region = {
-        index: clip_region_vertices(polydata, item["face_ids"], item.get("clip_polygon"))
+        index: clip_region_vertices(polydata, item["face_ids"], item.get("clip_polygon"), item.get("exclude_polygons"))
         for index, item in enumerate(planning_regions, 1)
     }
 
@@ -673,7 +692,15 @@ def main() -> None:
                 inside_regions.append(region_index)
                 for variant_name, feed_variant in FEED_VARIANTS:
                     # 第一阶段通常只跑 long_side；如果需要复核，可把 FEED_VARIANTS 改为长短边两套。
-                    path = plan_region_uv(polydata, placement, settings, planning_region["face_ids"], feed_variant, planning_region.get("clip_polygon"))
+                    path = plan_region_uv(
+                        polydata,
+                        placement,
+                        settings,
+                        planning_region["face_ids"],
+                        feed_variant,
+                        planning_region.get("clip_polygon"),
+                        planning_region.get("exclude_polygons"),
+                    )
                     if path.waypoints:
                         row = export_path_variant(project, placement, path, angle, region_index, variant_name)
                         row["region_label"] = region_label

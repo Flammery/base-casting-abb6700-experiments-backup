@@ -235,7 +235,10 @@ class ManualPartitionDialog(QDialog):
         color_index = 0
         for region_index, face_ids in sorted(self._region_faces.items()):
             # 这里显示的是规则 UV 裁剪区域，不按稀疏三角面重新拆面；后续轨迹采样也会按这些 clip polygon 过滤点。
-            partitions = clip_partitions_from_barriers(region_index, face_ids, self._faces, self.barriers)
+            partitions = sorted(
+                clip_partitions_from_barriers(region_index, face_ids, self._faces, self.barriers),
+                key=lambda partition: 0 if partition.exclude_polygons_model_xy else 1,
+            )
             for partition in partitions:
                 polygon = QPolygonF([scene_point_from_model_xy(point) for point in partition.clip_polygon_model_xy])
                 item = QGraphicsPolygonItem(polygon)

@@ -59,6 +59,16 @@ def point_in_polygon_xy(point: tuple[float, float], polygon: list[list[float]]) 
     return inside
 
 
+def point_allowed_by_clip(
+    point: tuple[float, float],
+    clip_polygon: list[list[float]] | None,
+    exclude_polygons: list[list[list[float]]] | None = None,
+) -> bool:
+    if clip_polygon and not point_in_polygon_xy(point, clip_polygon):
+        return False
+    return not any(point_in_polygon_xy(point, polygon) for polygon in (exclude_polygons or []))
+
+
 def cell_centroid_xy(polydata, cell_id: int) -> tuple[float, float]:
     cell = polydata.GetCell(cell_id)
     point_ids = cell.GetPointIds()
@@ -177,11 +187,12 @@ class RegionPreview(QWidget):
                         "label": str(patch.get("label", f"{source_region}_1")),
                         "face_ids": set(regions[source_region - 1]),
                         "clip_polygon": polygon,
+                        "exclude_polygons": patch.get("exclude_polygons") or [],
                     }
                 )
         for index, region in enumerate(regions, 1):
             if index not in patched_sources:
-                patches.append({"source_region": index, "label": str(index), "face_ids": region, "clip_polygon": None})
+                patches.append({"source_region": index, "label": str(index), "face_ids": region, "clip_polygon": None, "exclude_polygons": []})
         return patches
 
     def _apply_region_colors(self, polydata, regions: list[set[int]]) -> None:
@@ -213,8 +224,7 @@ class RegionPreview(QWidget):
             for patch_index, patch in enumerate(patches):
                 if cell_id not in patch["face_ids"]:
                     continue
-                polygon = patch.get("clip_polygon")
-                if polygon is None or point_in_polygon_xy(centroid, polygon):
+                if point_allowed_by_clip(centroid, patch.get("clip_polygon"), patch.get("exclude_polygons")):
                     color = patch_colors[patch_index]
                     break
             colors.InsertNextTypedTuple(color)
