@@ -90,6 +90,26 @@ def test_clip_partitions_keep_source_region_labels() -> None:
     assert any(partition.exclude_polygons_model_xy for partition in partitions)
 
 
+def test_slab_clip_partitions_keep_old_through_cut_behavior() -> None:
+    manual = _load_manual_module()
+    partitioning = _load_partitioning_module()
+    triangles = [*_rect(10, 0.0, 300.0, 0.0, 100.0)]
+    faces = partitioning.face_geometries_from_triangles(triangles)
+
+    partitions = manual.clip_partitions_from_barriers(
+        6,
+        {10},
+        faces,
+        [((100.0, -20.0), (100.0, 120.0)), ((200.0, -20.0), (200.0, 120.0))],
+        mode=manual.PARTITION_MODE_SLAB,
+    )
+
+    assert [partition.label for partition in partitions] == ["6_1", "6_2", "6_3"]
+    assert all(not partition.exclude_polygons_model_xy for partition in partitions)
+    assert min(point[1] for partition in partitions for point in partition.clip_polygon_model_xy) < 0.0
+    assert max(point[1] for partition in partitions for point in partition.clip_polygon_model_xy) > 100.0
+
+
 def test_clip_partition_uses_projected_face_boundary_not_bbox() -> None:
     manual = _load_manual_module()
     partitioning = _load_partitioning_module()
@@ -129,3 +149,22 @@ def test_manual_clip_manifest_records_do_not_renumber_following_regions() -> Non
     assert len(records) == 1
     assert records[0]["original_region"] == 1
     assert [patch["label"] for patch in records[0]["patches"]] == ["1_1", "1_2", "1_3"]
+
+
+def test_manual_clip_manifest_records_include_partition_mode() -> None:
+    manual = _load_manual_module()
+    partitioning = _load_partitioning_module()
+    triangles = [*_rect(10, 0.0, 300.0, 0.0, 100.0)]
+    faces = partitioning.face_geometries_from_triangles(triangles)
+
+    records = manual.manual_clip_manifest_records(
+        [[10]],
+        {1},
+        faces,
+        [((100.0, -20.0), (100.0, 120.0))],
+        mode=manual.PARTITION_MODE_SLAB,
+    )
+
+    assert records[0]["reason"] == "manual_uv_slab_clip"
+    assert records[0]["partition_mode"] == manual.PARTITION_MODE_SLAB
+    assert {patch["partition_mode"] for patch in records[0]["patches"]} == {manual.PARTITION_MODE_SLAB}

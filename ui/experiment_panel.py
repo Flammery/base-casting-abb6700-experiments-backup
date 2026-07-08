@@ -37,7 +37,12 @@ from experiment_config import (  # noqa: E402
     runner_command,
     validate_regions,
 )
-from manual_partition_dialog import ManualPartitionDialog, manual_manifest_path_for  # noqa: E402
+from manual_partition_dialog import (  # noqa: E402
+    PARTITION_MODE_BOUNDARY,
+    PARTITION_MODE_SLAB,
+    ManualPartitionDialog,
+    manual_manifest_path_for,
+)
 from region_viewer import RegionPreview  # noqa: E402
 
 
@@ -190,8 +195,13 @@ class ExperimentPanel(QWidget):
             QMessageBox.warning(self, "分区参数错误", str(exc))
             return
 
+        partition_mode = self._choose_partition_mode()
+        if partition_mode is None:
+            self.status.setText("已取消区域划分。")
+            return
+
         try:
-            dialog = ManualPartitionDialog(input_path, output_path, regions, self)
+            dialog = ManualPartitionDialog(input_path, output_path, regions, self, partition_mode=partition_mode)
         except Exception as exc:
             self.status.setText(f"区域划分加载失败: {exc}")
             QMessageBox.critical(self, "区域划分加载失败", str(exc))
@@ -206,6 +216,22 @@ class ExperimentPanel(QWidget):
         manifest_path = manual_manifest_path_for(output_path)
         self.status.setText(f"已完成手动区域划分: {output_path} | manifest={manifest_path}")
         QMessageBox.information(self, "完成", self.status.text())
+
+    def _choose_partition_mode(self) -> str | None:
+        box = QMessageBox(self)
+        box.setWindowTitle("选择区域划分方式")
+        box.setText("请选择这次手动 UV 区域划分方式。")
+        box.setInformativeText("面边界式会按当前面的投影边界闭合；贯穿式会沿拉线法向贯穿整个面域。")
+        boundary_button = box.addButton("面边界式", QMessageBox.ButtonRole.AcceptRole)
+        slab_button = box.addButton("贯穿式", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked == boundary_button:
+            return PARTITION_MODE_BOUNDARY
+        if clicked == slab_button:
+            return PARTITION_MODE_SLAB
+        return None
 
     def start_run(self) -> None:
         if self._process is not None:

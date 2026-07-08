@@ -34,7 +34,13 @@ from robot_studio_qt.cad.mesh_io import create_mesh_reader  # noqa: E402
 from robot_studio_qt.path_planning.mesh_raster import read_triangles  # noqa: E402
 from robot_studio_qt.project import load_project_file, save_project_file  # noqa: E402
 
-from manual_region_partitioning import BarrierLine, clip_partitions_from_barriers, manual_clip_manifest_records  # noqa: E402
+from manual_region_partitioning import (  # noqa: E402
+    PARTITION_MODE_BOUNDARY,
+    PARTITION_MODE_SLAB,
+    BarrierLine,
+    clip_partitions_from_barriers,
+    manual_clip_manifest_records,
+)
 from region_partitioning import face_geometries_from_triangles  # noqa: E402
 
 
@@ -46,6 +52,11 @@ PREVIEW_COLORS = [
     QColor(156, 118, 217, 110),
     QColor(224, 196, 74, 110),
 ]
+
+PARTITION_MODE_TITLES = {
+    PARTITION_MODE_BOUNDARY: "面边界式",
+    PARTITION_MODE_SLAB: "贯穿式",
+}
 
 
 def manual_manifest_path_for(output_path: Path) -> Path:
@@ -119,9 +130,17 @@ class BarrierView(QGraphicsView):
 
 
 class ManualPartitionDialog(QDialog):
-    def __init__(self, input_path: Path, output_path: Path, selected_regions: set[int], parent=None) -> None:
+    def __init__(
+        self,
+        input_path: Path,
+        output_path: Path,
+        selected_regions: set[int],
+        parent=None,
+        partition_mode: str = PARTITION_MODE_BOUNDARY,
+    ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("手动区域划分")
+        self.partition_mode = partition_mode
+        self.setWindowTitle(f"手动区域划分 - {PARTITION_MODE_TITLES.get(partition_mode, partition_mode)}")
         self.resize(1040, 760)
         self.input_path = input_path
         self.output_path = output_path
@@ -257,7 +276,15 @@ class ManualPartitionDialog(QDialog):
         barriers = self._current_barriers()
         if not barriers:
             return 1
-        return len(clip_partitions_from_barriers(self._current_region(), self._current_face_ids, self._faces, barriers))
+        return len(
+            clip_partitions_from_barriers(
+                self._current_region(),
+                self._current_face_ids,
+                self._faces,
+                barriers,
+                mode=self.partition_mode,
+            )
+        )
 
     def _refresh_partition_preview(self) -> None:
         for item in self._partition_items:
@@ -268,7 +295,13 @@ class ManualPartitionDialog(QDialog):
             return
 
         partitions = sorted(
-            clip_partitions_from_barriers(self._current_region(), self._current_face_ids, self._faces, barriers),
+            clip_partitions_from_barriers(
+                self._current_region(),
+                self._current_face_ids,
+                self._faces,
+                barriers,
+                mode=self.partition_mode,
+            ),
             key=lambda partition: 0 if partition.exclude_polygons_model_xy else 1,
         )
         for color_index, partition in enumerate(partitions):
@@ -335,6 +368,7 @@ class ManualPartitionDialog(QDialog):
                         {region_index},
                         faces,
                         self._barriers_by_region[region_index],
+                        mode=self.partition_mode,
                     )
                 )
 
@@ -344,6 +378,7 @@ class ManualPartitionDialog(QDialog):
                 "input_project": str(self.input_path),
                 "output_project": str(self.output_path),
                 "selected_regions": self.selected_regions,
+                "partition_mode": self.partition_mode,
                 "barriers_by_region": {
                     str(region): [[list(start), list(end)] for start, end in barriers]
                     for region, barriers in self._barriers_by_region.items()

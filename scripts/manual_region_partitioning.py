@@ -19,6 +19,9 @@ from region_partitioning import FaceGeometry, PartitionSettings, connected_compo
 
 Point2 = tuple[float, float]
 BarrierLine = tuple[Point2, Point2]
+PARTITION_MODE_BOUNDARY = "boundary"
+PARTITION_MODE_SLAB = "slab"
+PARTITION_MODES = {PARTITION_MODE_BOUNDARY, PARTITION_MODE_SLAB}
 
 
 @dataclass(frozen=True)
@@ -194,6 +197,50 @@ def _dedupe_polygon_points(points: list[Point2], epsilon: float = 1e-7) -> list[
     return output
 
 
+def _dot2(point: Point2, axis: Point2) -> float:
+    return point[0] * axis[0] + point[1] * axis[1]
+
+
+def _normalize2(vector: Point2) -> Point2:
+    length = (vector[0] * vector[0] + vector[1] * vector[1]) ** 0.5
+    if length <= 1e-12:
+        return (1.0, 0.0)
+    return (vector[0] / length, vector[1] / length)
+
+
+def _clip_polygon_by_half_plane(polygon: list[Point2], axis: Point2, threshold: float, keep_less_equal: bool) -> list[Point2]:
+    if not polygon:
+        return []
+
+    def inside(point: Point2) -> bool:
+        value = _dot2(point, axis)
+        return value <= threshold + 1e-9 if keep_less_equal else value >= threshold - 1e-9
+
+    def intersection(a: Point2, b: Point2) -> Point2:
+        da = _dot2(a, axis) - threshold
+        db = _dot2(b, axis) - threshold
+        denom = da - db
+        if abs(denom) <= 1e-12:
+            return a
+        t = da / denom
+        return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+
+    output: list[Point2] = []
+    previous = polygon[-1]
+    previous_inside = inside(previous)
+    for current in polygon:
+        current_inside = inside(current)
+        if current_inside:
+            if not previous_inside:
+                output.append(intersection(previous, current))
+            output.append(current)
+        elif previous_inside:
+            output.append(intersection(previous, current))
+        previous = current
+        previous_inside = current_inside
+    return output
+
+
 def face_ids_bounds_xy(face_ids: set[int], faces: dict[int, FaceGeometry]) -> tuple[float, float, float, float]:
     points = [
         (point[0], point[1])
@@ -341,12 +388,56 @@ def side_polygon_from_barrier(boundary: list[Point2], barrier: BarrierLine, regi
     return max(candidates, key=_polygon_centroid_x) if midpoint_x >= region_center_x else min(candidates, key=_polygon_centroid_x)
 
 
-def clip_partitions_from_barriers(
+def clip_partitions_from_barriers_slab(
     source_region: int,
     face_ids: set[int],
     faces: dict[int, FaceGeometry],
     barriers: list[BarrierLine],
     padding_ratio: float = 0.04,
+) -> list[ClipPartition]:
+    x_min, y_min, x_max, y_max = face_ids_bounds_xy(face_ids, faces)
+    span = max(x_max - x_min, y_max - y_min, 1.0)
+    padding = span * padding_ratio
+    base_polygon: list[Point2] = [
+        (x_min - padding, y_min - padding),
+        (x_max + padding, y_min - padding),
+        (x_max + padding, y_max + padding),
+        (x_min - padding, y_max + padding),
+    ]
+    valid_barriers = [
+        barrier
+        for barrier in barriers
+        if abs(barrier[0][0] - barrier[1][0]) + abs(barrier[0][1] - barrier[1][1]) > 1e-9
+    ]
+    if not valid_barriers:
+        return [ClipPartition(f"{source_region}_1", source_region, base_polygon, (None, None))]
+
+    # 贯穿式模式保留旧版逻辑：把拉线视为一组近似平行的无限分割线，
+    # 沿法向切出规则 slab，适合快速做左右/中间粗分区。
+    directions = [(end[0] - start[0], end[1] - start[1]) for start, end in valid_barriers]
+    average_direction = _normalize2((sum(item[0] for item in directions), sum(item[1] for item in directions)))
+    axis = _normalize2((-average_direction[1], average_direction[0]))
+    thresholds = sorted(_dot2(((start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5), axis) for start, end in valid_barriers)
+
+    partitions: list[ClipPartition] = []
+    lower: float | None = None
+    for index, upper in enumerate([*thresholds, None], 1):
+        polygon = list(base_polygon)
+        if lower is not None:
+            polygon = _clip_polygon_by_half_plane(polygon, axis, lower, keep_less_equal=False)
+        if upper is not None:
+            polygon = _clip_polygon_by_half_plane(polygon, axis, upper, keep_less_equal=True)
+        if len(polygon) >= 3:
+            partitions.append(ClipPartition(f"{source_region}_{index}", source_region, polygon, (lower, upper)))
+        lower = upper
+    return partitions or [ClipPartition(f"{source_region}_1", source_region, base_polygon, (None, None))]
+
+
+def clip_partitions_from_barriers_boundary(
+    source_region: int,
+    face_ids: set[int],
+    faces: dict[int, FaceGeometry],
+    barriers: list[BarrierLine],
 ) -> list[ClipPartition]:
     x_min, _y_min, x_max, _y_max = face_ids_bounds_xy(face_ids, faces)
     base_polygon = outer_boundary_polygon_xy(face_ids, faces)
@@ -379,27 +470,47 @@ def clip_partitions_from_barriers(
     ]
 
 
+def clip_partitions_from_barriers(
+    source_region: int,
+    face_ids: set[int],
+    faces: dict[int, FaceGeometry],
+    barriers: list[BarrierLine],
+    padding_ratio: float = 0.04,
+    mode: str = PARTITION_MODE_BOUNDARY,
+) -> list[ClipPartition]:
+    if mode == PARTITION_MODE_SLAB:
+        return clip_partitions_from_barriers_slab(source_region, face_ids, faces, barriers, padding_ratio)
+    if mode == PARTITION_MODE_BOUNDARY:
+        return clip_partitions_from_barriers_boundary(source_region, face_ids, faces, barriers)
+    raise ValueError(f"unknown manual partition mode: {mode}")
+
+
 def manual_clip_manifest_records(
     regions: list[list[int]],
     selected_region_numbers: set[int],
     faces: dict[int, FaceGeometry],
     barriers: list[BarrierLine],
+    mode: str = PARTITION_MODE_BOUNDARY,
 ) -> list[dict]:
+    if mode not in PARTITION_MODES:
+        raise ValueError(f"unknown manual partition mode: {mode}")
     records: list[dict] = []
     for region_index, raw_region in enumerate(regions, 1):
         if region_index not in selected_region_numbers:
             continue
         face_ids = {int(face_id) for face_id in raw_region}
-        partitions = clip_partitions_from_barriers(region_index, face_ids, faces, barriers)
+        partitions = clip_partitions_from_barriers(region_index, face_ids, faces, barriers, mode=mode)
         records.append(
             {
                 "original_region": region_index,
-                "reason": "manual_uv_boundary_clip",
+                "reason": "manual_uv_boundary_clip" if mode == PARTITION_MODE_BOUNDARY else "manual_uv_slab_clip",
+                "partition_mode": mode,
                 "output_patch_count": len(partitions),
                 "patches": [
                     {
                         "label": partition.label,
                         "source_region": partition.source_region,
+                        "partition_mode": mode,
                         "clip_space": "model_xy",
                         "clip_polygon": [list(point) for point in partition.clip_polygon_model_xy],
                         "exclude_polygons": [
