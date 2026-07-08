@@ -168,6 +168,48 @@ def test_boundary_clip_records_inner_holes_as_exclusions() -> None:
     assert (60.0, 60.0) in hole_points
 
 
+def test_pick_clip_only_outputs_selected_polygons() -> None:
+    manual = _load_manual_module()
+    partitioning = _load_partitioning_module()
+    triangles = [*_rect(10, 0.0, 300.0, 0.0, 100.0)]
+    faces = partitioning.face_geometries_from_triangles(triangles)
+
+    partitions = manual.clip_partitions_from_picked_polygons(
+        6,
+        {10},
+        faces,
+        [
+            [(0.0, 0.0), (80.0, 0.0), (80.0, 100.0), (0.0, 100.0)],
+            [(200.0, 0.0), (300.0, 0.0), (300.0, 100.0), (200.0, 100.0)],
+        ],
+    )
+
+    assert [partition.label for partition in partitions] == ["6_1", "6_2"]
+    assert partitions[0].clip_polygon_model_xy[0] == (0.0, 0.0)
+    assert partitions[1].clip_polygon_model_xy[0] == (200.0, 0.0)
+
+
+def test_pick_clip_keeps_holes_as_exclusions() -> None:
+    manual = _load_manual_module()
+    partitioning = _load_partitioning_module()
+    triangles = _frame_with_rect_hole()
+    faces = partitioning.face_geometries_from_triangles(triangles)
+
+    records = manual.manual_pick_manifest_records(
+        [sorted(faces)],
+        {1},
+        faces,
+        [[(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]],
+    )
+
+    assert records[0]["reason"] == "manual_uv_pick_clip"
+    assert records[0]["partition_mode"] == manual.PARTITION_MODE_PICK
+    assert [patch["label"] for patch in records[0]["patches"]] == ["1_1"]
+    hole_points = {tuple(point) for polygon in records[0]["patches"][0]["exclude_polygons"] for point in polygon}
+    assert (40.0, 40.0) in hole_points
+    assert (60.0, 60.0) in hole_points
+
+
 def test_manual_clip_manifest_records_do_not_renumber_following_regions() -> None:
     manual = _load_manual_module()
     partitioning = _load_partitioning_module()

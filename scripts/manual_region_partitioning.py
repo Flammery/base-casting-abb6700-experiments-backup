@@ -21,7 +21,8 @@ Point2 = tuple[float, float]
 BarrierLine = tuple[Point2, Point2]
 PARTITION_MODE_BOUNDARY = "boundary"
 PARTITION_MODE_SLAB = "slab"
-PARTITION_MODES = {PARTITION_MODE_BOUNDARY, PARTITION_MODE_SLAB}
+PARTITION_MODE_PICK = "pick"
+PARTITION_MODES = {PARTITION_MODE_BOUNDARY, PARTITION_MODE_SLAB, PARTITION_MODE_PICK}
 
 
 @dataclass(frozen=True)
@@ -518,6 +519,30 @@ def clip_partitions_from_barriers(
     raise ValueError(f"unknown manual partition mode: {mode}")
 
 
+def clip_partitions_from_picked_polygons(
+    source_region: int,
+    face_ids: set[int],
+    faces: dict[int, FaceGeometry],
+    picked_polygons: list[list[Point2]],
+) -> list[ClipPartition]:
+    _outer_polygon, hole_polygons = boundary_polygon_with_holes_xy(face_ids, faces)
+    partitions: list[ClipPartition] = []
+    for index, polygon in enumerate(picked_polygons, 1):
+        polygon = _dedupe_polygon_points(list(polygon))
+        if len(polygon) < 3 or abs(_polygon_area(polygon)) <= 1e-6:
+            continue
+        partitions.append(
+            ClipPartition(
+                f"{source_region}_{index}",
+                source_region,
+                polygon,
+                (None, None),
+                exclude_polygons_model_xy=hole_polygons,
+            )
+        )
+    return partitions
+
+
 def manual_clip_manifest_records(
     regions: list[list[int]],
     selected_region_numbers: set[int],
@@ -525,8 +550,8 @@ def manual_clip_manifest_records(
     barriers: list[BarrierLine],
     mode: str = PARTITION_MODE_BOUNDARY,
 ) -> list[dict]:
-    if mode not in PARTITION_MODES:
-        raise ValueError(f"unknown manual partition mode: {mode}")
+    if mode not in {PARTITION_MODE_BOUNDARY, PARTITION_MODE_SLAB}:
+        raise ValueError(f"manual line partition mode must be boundary or slab: {mode}")
     records: list[dict] = []
     for region_index, raw_region in enumerate(regions, 1):
         if region_index not in selected_region_numbers:
@@ -544,6 +569,46 @@ def manual_clip_manifest_records(
                         "label": partition.label,
                         "source_region": partition.source_region,
                         "partition_mode": mode,
+                        "clip_space": "model_xy",
+                        "clip_polygon": [list(point) for point in partition.clip_polygon_model_xy],
+                        "exclude_polygons": [
+                            [list(point) for point in polygon]
+                            for polygon in (partition.exclude_polygons_model_xy or [])
+                        ],
+                        "barrier_range": list(partition.barrier_range),
+                        "face_count": len(face_ids),
+                        "face_ids": sorted(face_ids),
+                    }
+                    for partition in partitions
+                ],
+            }
+        )
+    return records
+
+
+def manual_pick_manifest_records(
+    regions: list[list[int]],
+    selected_region_numbers: set[int],
+    faces: dict[int, FaceGeometry],
+    picked_polygons: list[list[Point2]],
+) -> list[dict]:
+    records: list[dict] = []
+    for region_index, raw_region in enumerate(regions, 1):
+        if region_index not in selected_region_numbers:
+            continue
+        face_ids = {int(face_id) for face_id in raw_region}
+        partitions = clip_partitions_from_picked_polygons(region_index, face_ids, faces, picked_polygons)
+        records.append(
+            {
+                "original_region": region_index,
+                "reason": "manual_uv_pick_clip",
+                "partition_mode": PARTITION_MODE_PICK,
+                "output_patch_count": len(partitions),
+                "patches": [
+                    {
+                        "label": partition.label,
+                        "source_region": partition.source_region,
+                        "partition_mode": PARTITION_MODE_PICK,
                         "clip_space": "model_xy",
                         "clip_polygon": [list(point) for point in partition.clip_polygon_model_xy],
                         "exclude_polygons": [

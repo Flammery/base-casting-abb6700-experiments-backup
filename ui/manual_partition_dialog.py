@@ -36,10 +36,13 @@ from robot_studio_qt.project import load_project_file, save_project_file  # noqa
 
 from manual_region_partitioning import (  # noqa: E402
     PARTITION_MODE_BOUNDARY,
+    PARTITION_MODE_PICK,
     PARTITION_MODE_SLAB,
     BarrierLine,
     clip_partitions_from_barriers,
+    clip_partitions_from_picked_polygons,
     manual_clip_manifest_records,
+    manual_pick_manifest_records,
 )
 from region_partitioning import face_geometries_from_triangles  # noqa: E402
 
@@ -56,6 +59,7 @@ PREVIEW_COLORS = [
 PARTITION_MODE_TITLES = {
     PARTITION_MODE_BOUNDARY: "面边界式",
     PARTITION_MODE_SLAB: "贯穿式",
+    PARTITION_MODE_PICK: "圈选区域式",
 }
 
 
@@ -75,18 +79,29 @@ def model_xy_from_scene_point(point: QPointF) -> tuple[float, float]:
 
 class BarrierView(QGraphicsView):
     barrier_drawn = Signal(tuple)
+    rect_drawn = Signal(tuple)
+    polygon_drawn = Signal(list)
 
     def __init__(self, scene: QGraphicsScene) -> None:
         super().__init__(scene)
-        self._draw_mode = False
+        self._draw_mode = "none"
         self._start: QPointF | None = None
         self._rubber_line: QGraphicsLineItem | None = None
+        self._rubber_polygon: QGraphicsPolygonItem | None = None
+        self._polygon_points: list[QPointF] = []
+        self._polygon_items: list[QGraphicsLineItem] = []
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
 
     def set_draw_mode(self, enabled: bool) -> None:
-        self._draw_mode = enabled
+        self.set_tool_mode("line" if enabled else "none")
+
+    def set_tool_mode(self, mode: str) -> None:
+        if mode != "polygon":
+            self._finish_polygon(cancel=True)
+        self._draw_mode = mode
+        enabled = mode != "none"
         self.setDragMode(QGraphicsView.DragMode.NoDrag if enabled else QGraphicsView.DragMode.ScrollHandDrag)
         self.setCursor(Qt.CursorShape.CrossCursor if enabled else Qt.CursorShape.ArrowCursor)
 
@@ -95,38 +110,110 @@ class BarrierView(QGraphicsView):
         self.scale(factor, factor)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
-        if not self._draw_mode or event.button() != Qt.MouseButton.LeftButton:
+        if self._draw_mode == "polygon":
+            if event.button() == Qt.MouseButton.RightButton:
+                self._finish_polygon()
+                return
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._add_polygon_point(self.mapToScene(event.position().toPoint()))
+                return
+        if self._draw_mode not in ("line", "rect") or event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
         self._start = self.mapToScene(event.position().toPoint())
-        self._rubber_line = self.scene().addLine(
-            self._start.x(),
-            self._start.y(),
-            self._start.x(),
-            self._start.y(),
-            QPen(QColor(255, 230, 0), 5),
-        )
-        self._rubber_line.setZValue(30)
+        if self._draw_mode == "line":
+            self._rubber_line = self.scene().addLine(
+                self._start.x(),
+                self._start.y(),
+                self._start.x(),
+                self._start.y(),
+                QPen(QColor(255, 230, 0), 5),
+            )
+            self._rubber_line.setZValue(30)
+        else:
+            self._rubber_polygon = self.scene().addPolygon(QPolygonF(), QPen(QColor(255, 70, 70), 3), QBrush(QColor(255, 70, 70, 60)))
+            self._rubber_polygon.setZValue(35)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
-        if self._draw_mode and self._start is not None and self._rubber_line is not None:
+        if self._draw_mode == "line" and self._start is not None and self._rubber_line is not None:
             point = self.mapToScene(event.position().toPoint())
             self._rubber_line.setLine(self._start.x(), self._start.y(), point.x(), point.y())
+            return
+        if self._draw_mode == "rect" and self._start is not None and self._rubber_polygon is not None:
+            point = self.mapToScene(event.position().toPoint())
+            self._rubber_polygon.setPolygon(_scene_rect_polygon(self._start, point))
             return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
-        if not self._draw_mode or self._start is None or self._rubber_line is None:
-            super().mouseReleaseEvent(event)
+        if self._draw_mode == "line" and self._start is not None and self._rubber_line is not None:
+            end = self.mapToScene(event.position().toPoint())
+            start = self._start
+            rubber_line = self._rubber_line
+            self._rubber_line = None
+            self._start = None
+            self.scene().removeItem(rubber_line)
+            if (start - end).manhattanLength() > 1.0:
+                self.barrier_drawn.emit((model_xy_from_scene_point(start), model_xy_from_scene_point(end)))
             return
-        end = self.mapToScene(event.position().toPoint())
-        start = self._start
-        rubber_line = self._rubber_line
-        self._rubber_line = None
-        self._start = None
-        self.scene().removeItem(rubber_line)
-        if (start - end).manhattanLength() > 1.0:
-            self.barrier_drawn.emit((model_xy_from_scene_point(start), model_xy_from_scene_point(end)))
+        if self._draw_mode == "rect" and self._start is not None and self._rubber_polygon is not None:
+            end = self.mapToScene(event.position().toPoint())
+            start = self._start
+            rubber_polygon = self._rubber_polygon
+            self._rubber_polygon = None
+            self._start = None
+            self.scene().removeItem(rubber_polygon)
+            if abs(start.x() - end.x()) > 1.0 and abs(start.y() - end.y()) > 1.0:
+                self.rect_drawn.emit(tuple(model_xy_from_scene_point(point) for point in _scene_rect_points(start, end)))
+            return
+        if self._draw_mode == "polygon":
+            return
+        if self._start is not None:
+            self._start = None
+        if self._rubber_line is not None:
+            self.scene().removeItem(self._rubber_line)
+            self._rubber_line = None
+        if self._rubber_polygon is not None:
+            self.scene().removeItem(self._rubber_polygon)
+            self._rubber_polygon = None
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        if self._draw_mode == "polygon" and event.button() == Qt.MouseButton.LeftButton:
+            self._finish_polygon()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _add_polygon_point(self, point: QPointF) -> None:
+        if self._polygon_points:
+            previous = self._polygon_points[-1]
+            item = self.scene().addLine(previous.x(), previous.y(), point.x(), point.y(), QPen(QColor(255, 70, 70), 3))
+            item.setZValue(35)
+            self._polygon_items.append(item)
+        self._polygon_points.append(point)
+
+    def _finish_polygon(self, cancel: bool = False) -> None:
+        points = self._polygon_points
+        items = self._polygon_items
+        self._polygon_points = []
+        self._polygon_items = []
+        for item in items:
+            self.scene().removeItem(item)
+        if not cancel and len(points) >= 3:
+            self.polygon_drawn.emit([model_xy_from_scene_point(point) for point in points])
+
+
+def _scene_rect_points(start: QPointF, end: QPointF) -> list[QPointF]:
+    return [
+        QPointF(start.x(), start.y()),
+        QPointF(end.x(), start.y()),
+        QPointF(end.x(), end.y()),
+        QPointF(start.x(), end.y()),
+    ]
+
+
+def _scene_rect_polygon(start: QPointF, end: QPointF) -> QPolygonF:
+    return QPolygonF(_scene_rect_points(start, end))
 
 
 class ManualPartitionDialog(QDialog):
@@ -147,6 +234,7 @@ class ManualPartitionDialog(QDialog):
         self.selected_regions = sorted(set(selected_regions))
         self._current_index = 0
         self._barriers_by_region: dict[int, list[BarrierLine]] = {region: [] for region in self.selected_regions}
+        self._picked_polygons_by_region: dict[int, list[list[tuple[float, float]]]] = {region: [] for region in self.selected_regions}
         self._geometry_cache: dict[int, tuple[list, dict]] = {}
         self._line_items: list[QGraphicsLineItem] = []
         self._partition_items: list[QGraphicsPolygonItem] = []
@@ -156,11 +244,16 @@ class ManualPartitionDialog(QDialog):
         self.scene.setBackgroundBrush(QBrush(QColor(8, 10, 12)))
         self.view = BarrierView(self.scene)
         self.view.barrier_drawn.connect(self._add_barrier)
+        self.view.rect_drawn.connect(self._add_picked_polygon)
+        self.view.polygon_drawn.connect(self._add_picked_polygon)
 
         self.hint = QLabel("")
         self.hint.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.draw_button = QPushButton("拉线")
+        self.rect_button = QPushButton("矩形")
+        self.polygon_button = QPushButton("多边形")
         self.clear_button = QPushButton("清空线")
+        self.clear_pick_button = QPushButton("清空区域")
         self.prev_button = QPushButton("上一个")
         self.next_button = QPushButton("下一个")
         self.apply_button = QPushButton("应用")
@@ -169,7 +262,10 @@ class ManualPartitionDialog(QDialog):
         button_row = QHBoxLayout()
         button_row.addWidget(self.hint, 1)
         button_row.addWidget(self.draw_button)
+        button_row.addWidget(self.rect_button)
+        button_row.addWidget(self.polygon_button)
         button_row.addWidget(self.clear_button)
+        button_row.addWidget(self.clear_pick_button)
         button_row.addWidget(self.prev_button)
         button_row.addWidget(self.next_button)
         button_row.addWidget(self.apply_button)
@@ -180,8 +276,13 @@ class ManualPartitionDialog(QDialog):
         layout.addLayout(button_row)
 
         self.draw_button.setCheckable(True)
+        self.rect_button.setCheckable(True)
+        self.polygon_button.setCheckable(True)
         self.draw_button.toggled.connect(self._toggle_draw_mode)
+        self.rect_button.toggled.connect(self._toggle_rect_mode)
+        self.polygon_button.toggled.connect(self._toggle_polygon_mode)
         self.clear_button.clicked.connect(self._clear_barriers)
+        self.clear_pick_button.clicked.connect(self._clear_picked_polygons)
         self.prev_button.clicked.connect(self._show_previous_region)
         self.next_button.clicked.connect(self._show_next_region)
         self.apply_button.clicked.connect(self._apply)
@@ -196,8 +297,39 @@ class ManualPartitionDialog(QDialog):
     def _current_barriers(self) -> list[BarrierLine]:
         return self._barriers_by_region[self._current_region()]
 
+    def _current_picked_polygons(self) -> list[list[tuple[float, float]]]:
+        return self._picked_polygons_by_region[self._current_region()]
+
+    def _is_pick_mode(self) -> bool:
+        return self.partition_mode == PARTITION_MODE_PICK
+
+    def _set_tool_button_state(self, active_button: QPushButton | None) -> None:
+        for button in (self.draw_button, self.rect_button, self.polygon_button):
+            if button is not active_button and button.isChecked():
+                button.blockSignals(True)
+                button.setChecked(False)
+                button.blockSignals(False)
+
     def _toggle_draw_mode(self, enabled: bool) -> None:
+        if enabled:
+            self._set_tool_button_state(self.draw_button)
         self.view.set_draw_mode(enabled)
+        self._update_hint()
+
+    def _toggle_rect_mode(self, enabled: bool) -> None:
+        if enabled:
+            self._set_tool_button_state(self.rect_button)
+            self.view.set_tool_mode("rect")
+        elif not self.polygon_button.isChecked() and not self.draw_button.isChecked():
+            self.view.set_tool_mode("none")
+        self._update_hint()
+
+    def _toggle_polygon_mode(self, enabled: bool) -> None:
+        if enabled:
+            self._set_tool_button_state(self.polygon_button)
+            self.view.set_tool_mode("polygon")
+        elif not self.rect_button.isChecked() and not self.draw_button.isChecked():
+            self.view.set_tool_mode("none")
         self._update_hint()
 
     def _load_project(self) -> None:
@@ -227,6 +359,8 @@ class ManualPartitionDialog(QDialog):
         self._line_items.clear()
         self._partition_items.clear()
         self.draw_button.setChecked(False)
+        self.rect_button.setChecked(False)
+        self.polygon_button.setChecked(False)
 
         region_index = self._current_region()
         triangles, faces = self._region_geometry(region_index)
@@ -254,8 +388,11 @@ class ManualPartitionDialog(QDialog):
 
         for barrier in self._current_barriers():
             self._draw_barrier_line(barrier)
+        for polygon in self._current_picked_polygons():
+            self._draw_pick_polygon(polygon)
         self._refresh_partition_preview()
         self._update_nav_buttons()
+        self._update_tool_visibility()
         self._update_hint()
 
     def _draw_barrier_line(self, barrier: BarrierLine) -> None:
@@ -272,7 +409,32 @@ class ManualPartitionDialog(QDialog):
         self._refresh_partition_preview()
         self._update_hint()
 
+    def _draw_pick_polygon(self, polygon: list[tuple[float, float]]) -> None:
+        item = QGraphicsPolygonItem(QPolygonF([scene_point_from_model_xy(point) for point in polygon]))
+        item.setBrush(QBrush(QColor(255, 70, 70, 80)))
+        item.setPen(QPen(QColor(255, 70, 70), 2.4))
+        item.setZValue(20)
+        self.scene.addItem(item)
+        self._partition_items.append(item)
+
+    def _add_picked_polygon(self, polygon) -> None:
+        points = [(float(point[0]), float(point[1])) for point in polygon]
+        if len(points) < 3:
+            return
+        self._current_picked_polygons().append(points)
+        self._refresh_partition_preview()
+        self._update_hint()
+
     def _preview_patch_count(self) -> int:
+        if self._is_pick_mode():
+            return len(
+                clip_partitions_from_picked_polygons(
+                    self._current_region(),
+                    self._current_face_ids,
+                    self._faces,
+                    self._current_picked_polygons(),
+                )
+            )
         barriers = self._current_barriers()
         if not barriers:
             return 1
@@ -290,6 +452,10 @@ class ManualPartitionDialog(QDialog):
         for item in self._partition_items:
             self.scene.removeItem(item)
         self._partition_items.clear()
+        if self._is_pick_mode():
+            for polygon in self._current_picked_polygons():
+                self._draw_pick_polygon(polygon)
+            return
         barriers = self._current_barriers()
         if not barriers:
             return
@@ -321,6 +487,11 @@ class ManualPartitionDialog(QDialog):
         self._refresh_partition_preview()
         self._update_hint()
 
+    def _clear_picked_polygons(self) -> None:
+        self._picked_polygons_by_region[self._current_region()] = []
+        self._refresh_partition_preview()
+        self._update_hint()
+
     def _show_previous_region(self) -> None:
         if self._current_index <= 0:
             return
@@ -340,20 +511,42 @@ class ManualPartitionDialog(QDialog):
         self.prev_button.setVisible(multiple)
         self.next_button.setVisible(multiple)
 
+    def _update_tool_visibility(self) -> None:
+        pick_mode = self._is_pick_mode()
+        self.draw_button.setVisible(not pick_mode)
+        self.clear_button.setVisible(not pick_mode)
+        self.rect_button.setVisible(pick_mode)
+        self.polygon_button.setVisible(pick_mode)
+        self.clear_pick_button.setVisible(pick_mode)
+
     def _update_hint(self) -> None:
         region_index = self._current_region()
+        page = f"{self._current_index + 1}/{len(self.selected_regions)}"
+        if self._is_pick_mode():
+            if self.rect_button.isChecked():
+                state = "矩形圈选开启"
+            elif self.polygon_button.isChecked():
+                state = "多边形圈选开启"
+            else:
+                state = "圈选关闭"
+            self.hint.setText(
+                f"{state} | 当前 region {region_index} ({page}) | "
+                f"圈选区域 {len(self._current_picked_polygons())} 个 | 预览分区 {self._preview_patch_count()} 个"
+            )
+            return
         barriers = len(self._current_barriers())
         draw_state = "拉线模式开启" if self.draw_button.isChecked() else "拉线模式关闭"
-        page = f"{self._current_index + 1}/{len(self.selected_regions)}"
         self.hint.setText(
             f"{draw_state} | 当前 region {region_index} ({page}) | "
             f"分割线 {barriers} 条 | 预览分区 {self._preview_patch_count()} 个"
         )
 
     def _apply(self) -> None:
-        missing = [region for region in self.selected_regions if not self._barriers_by_region.get(region)]
+        source_by_region = self._picked_polygons_by_region if self._is_pick_mode() else self._barriers_by_region
+        missing = [region for region in self.selected_regions if not source_by_region.get(region)]
         if missing:
-            QMessageBox.warning(self, "还有 region 未拉线", f"请先完成这些 region 的拉线: {missing}")
+            action = "圈选区域" if self._is_pick_mode() else "拉线"
+            QMessageBox.warning(self, f"还有 region 未{action}", f"请先完成这些 region 的{action}: {missing}")
             return
         try:
             output_project = deepcopy(self.project)
@@ -362,15 +555,25 @@ class ManualPartitionDialog(QDialog):
             records: list[dict] = []
             for region_index in self.selected_regions:
                 _triangles, faces = self._region_geometry(region_index)
-                records.extend(
-                    manual_clip_manifest_records(
-                        self.project.selected_path_face_regions,
-                        {region_index},
-                        faces,
-                        self._barriers_by_region[region_index],
-                        mode=self.partition_mode,
+                if self._is_pick_mode():
+                    records.extend(
+                        manual_pick_manifest_records(
+                            self.project.selected_path_face_regions,
+                            {region_index},
+                            faces,
+                            self._picked_polygons_by_region[region_index],
+                        )
                     )
-                )
+                else:
+                    records.extend(
+                        manual_clip_manifest_records(
+                            self.project.selected_path_face_regions,
+                            {region_index},
+                            faces,
+                            self._barriers_by_region[region_index],
+                            mode=self.partition_mode,
+                        )
+                    )
 
             manifest = {
                 "schema": "base_casting_abb6700.manual_region_partition_manifest",
@@ -382,6 +585,10 @@ class ManualPartitionDialog(QDialog):
                 "barriers_by_region": {
                     str(region): [[list(start), list(end)] for start, end in barriers]
                     for region, barriers in self._barriers_by_region.items()
+                },
+                "picked_polygons_by_region": {
+                    str(region): [[list(point) for point in polygon] for polygon in polygons]
+                    for region, polygons in self._picked_polygons_by_region.items()
                 },
                 "input_region_count": len(self.project.selected_path_face_regions),
                 "output_region_count": len(self.project.selected_path_face_regions),

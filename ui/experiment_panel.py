@@ -39,6 +39,7 @@ from experiment_config import (  # noqa: E402
 )
 from manual_partition_dialog import (  # noqa: E402
     PARTITION_MODE_BOUNDARY,
+    PARTITION_MODE_PICK,
     PARTITION_MODE_SLAB,
     ManualPartitionDialog,
     manual_manifest_path_for,
@@ -221,9 +222,10 @@ class ExperimentPanel(QWidget):
         box = QMessageBox(self)
         box.setWindowTitle("选择区域划分方式")
         box.setText("请选择这次手动 UV 区域划分方式。")
-        box.setInformativeText("面边界式会按当前面的投影边界闭合；贯穿式会沿拉线法向贯穿整个面域。")
+        box.setInformativeText("面边界式和贯穿式使用拉线；圈选区域式只保留框选/多边形圈出的加工区。")
         boundary_button = box.addButton("面边界式", QMessageBox.ButtonRole.AcceptRole)
         slab_button = box.addButton("贯穿式", QMessageBox.ButtonRole.ActionRole)
+        pick_button = box.addButton("圈选区域式", QMessageBox.ButtonRole.ActionRole)
         box.addButton(QMessageBox.StandardButton.Cancel)
         box.exec()
         clicked = box.clickedButton()
@@ -231,6 +233,8 @@ class ExperimentPanel(QWidget):
             return PARTITION_MODE_BOUNDARY
         if clicked == slab_button:
             return PARTITION_MODE_SLAB
+        if clicked == pick_button:
+            return PARTITION_MODE_PICK
         return None
 
     def start_run(self) -> None:
