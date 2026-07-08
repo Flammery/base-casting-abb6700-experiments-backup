@@ -47,6 +47,19 @@ def _rect(face_id: int, x0: float, x1: float, y0: float, y1: float) -> list[Mesh
     return [_triangle(face_id, a, b, c), _triangle(face_id, a, c, d)]
 
 
+def _frame_with_rect_hole() -> list[MeshTriangle]:
+    return [
+        *_rect(10, 0.0, 40.0, 0.0, 40.0),
+        *_rect(11, 40.0, 60.0, 0.0, 40.0),
+        *_rect(12, 60.0, 100.0, 0.0, 40.0),
+        *_rect(13, 0.0, 40.0, 40.0, 60.0),
+        *_rect(14, 60.0, 100.0, 40.0, 60.0),
+        *_rect(15, 0.0, 40.0, 60.0, 100.0),
+        *_rect(16, 40.0, 60.0, 60.0, 100.0),
+        *_rect(17, 60.0, 100.0, 60.0, 100.0),
+    ]
+
+
 def test_manual_barrier_splits_adjacent_faces() -> None:
     manual = _load_manual_module()
     partitioning = _load_partitioning_module()
@@ -131,6 +144,28 @@ def test_clip_partition_uses_projected_face_boundary_not_bbox() -> None:
     assert (60.0, 100.0) in side.clip_polygon_model_xy
     assert (0.0, 180.0) in side.clip_polygon_model_xy
     assert all(point[0] <= 70.0 for point in side.clip_polygon_model_xy)
+
+
+def test_boundary_clip_records_inner_holes_as_exclusions() -> None:
+    manual = _load_manual_module()
+    partitioning = _load_partitioning_module()
+    triangles = _frame_with_rect_hole()
+    faces = partitioning.face_geometries_from_triangles(triangles)
+    face_ids = set(faces)
+
+    partitions = manual.clip_partitions_from_barriers(
+        6,
+        face_ids,
+        faces,
+        [((30.0, -10.0), (30.0, 110.0))],
+        mode=manual.PARTITION_MODE_BOUNDARY,
+    )
+
+    assert partitions
+    assert all(partition.exclude_polygons_model_xy for partition in partitions)
+    hole_points = {point for partition in partitions for polygon in (partition.exclude_polygons_model_xy or []) for point in polygon}
+    assert (40.0, 40.0) in hole_points
+    assert (60.0, 60.0) in hole_points
 
 
 def test_manual_clip_manifest_records_do_not_renumber_following_regions() -> None:

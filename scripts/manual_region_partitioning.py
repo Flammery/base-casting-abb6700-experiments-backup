@@ -186,6 +186,29 @@ def _polygon_centroid_x(polygon: list[Point2]) -> float:
     return sum(point[0] for point in polygon) / len(polygon)
 
 
+def _polygon_centroid(polygon: list[Point2]) -> Point2:
+    if not polygon:
+        return (0.0, 0.0)
+    return (sum(point[0] for point in polygon) / len(polygon), sum(point[1] for point in polygon) / len(polygon))
+
+
+def _point_in_polygon(point: Point2, polygon: list[Point2]) -> bool:
+    if len(polygon) < 3:
+        return False
+    inside = False
+    x, y = point
+    previous = polygon[-1]
+    for current in polygon:
+        xi, yi = current
+        xj, yj = previous
+        if (yi > y) != (yj > y):
+            cross_x = (xj - xi) * (y - yi) / ((yj - yi) or 1e-12) + xi
+            if x <= cross_x:
+                inside = not inside
+        previous = current
+    return inside
+
+
 def _dedupe_polygon_points(points: list[Point2], epsilon: float = 1e-7) -> list[Point2]:
     output: list[Point2] = []
     for point in points:
@@ -314,6 +337,16 @@ def outer_boundary_polygon_xy(face_ids: set[int], faces: dict[int, FaceGeometry]
     return [(x_min, y_min), (x_max, y_min), (x_max, y_max), (x_min, y_max)]
 
 
+def boundary_polygon_with_holes_xy(face_ids: set[int], faces: dict[int, FaceGeometry]) -> tuple[list[Point2], list[list[Point2]]]:
+    loops = boundary_loops_xy(face_ids, faces)
+    if not loops:
+        return outer_boundary_polygon_xy(face_ids, faces), []
+    outer = loops[0]
+    # 划分边界只用外轮廓；孔洞作为排除区写入 manifest，路径采样时自然不会进入孔内。
+    holes = [loop for loop in loops[1:] if _point_in_polygon(_polygon_centroid(loop), outer)]
+    return outer, holes
+
+
 def _ring_stations(ring: list[Point2]) -> tuple[list[float], float]:
     stations = [0.0]
     total = 0.0
@@ -440,9 +473,9 @@ def clip_partitions_from_barriers_boundary(
     barriers: list[BarrierLine],
 ) -> list[ClipPartition]:
     x_min, _y_min, x_max, _y_max = face_ids_bounds_xy(face_ids, faces)
-    base_polygon = outer_boundary_polygon_xy(face_ids, faces)
+    base_polygon, hole_polygons = boundary_polygon_with_holes_xy(face_ids, faces)
     if not barriers:
-        return [ClipPartition(f"{source_region}_1", source_region, base_polygon, (None, None))]
+        return [ClipPartition(f"{source_region}_1", source_region, base_polygon, (None, None), exclude_polygons_model_xy=hole_polygons)]
 
     region_center_x = (x_min + x_max) * 0.5
     side_polygons = [
@@ -452,11 +485,11 @@ def clip_partitions_from_barriers_boundary(
     ]
     side_polygons = [polygon for polygon in side_polygons if len(polygon) >= 3 and abs(_polygon_area(polygon)) > 1e-6]
     if not side_polygons:
-        return [ClipPartition(f"{source_region}_1", source_region, base_polygon, (None, None))]
+        return [ClipPartition(f"{source_region}_1", source_region, base_polygon, (None, None), exclude_polygons_model_xy=hole_polygons)]
 
     # 主区仍然是完整面域，但排除两侧由真实轮廓闭合出来的侧区；路径采样点本身只来自面域。
-    partitions = [ClipPartition("", source_region, base_polygon, (None, None), exclude_polygons_model_xy=side_polygons)]
-    partitions.extend(ClipPartition("", source_region, polygon, (None, None)) for polygon in side_polygons)
+    partitions = [ClipPartition("", source_region, base_polygon, (None, None), exclude_polygons_model_xy=[*side_polygons, *hole_polygons])]
+    partitions.extend(ClipPartition("", source_region, polygon, (None, None), exclude_polygons_model_xy=hole_polygons) for polygon in side_polygons)
     partitions.sort(key=lambda partition: _polygon_centroid_x(partition.clip_polygon_model_xy))
     return [
         ClipPartition(
