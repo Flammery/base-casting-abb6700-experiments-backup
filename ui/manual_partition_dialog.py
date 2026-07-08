@@ -125,28 +125,34 @@ class ManualPartitionDialog(QDialog):
         self.resize(1040, 760)
         self.input_path = input_path
         self.output_path = output_path
-        self.selected_regions = set(selected_regions)
-        self.barriers: list[BarrierLine] = []
+        self.selected_regions = sorted(set(selected_regions))
+        self._current_index = 0
+        self._barriers_by_region: dict[int, list[BarrierLine]] = {region: [] for region in self.selected_regions}
+        self._geometry_cache: dict[int, tuple[list, dict]] = {}
         self._line_items: list[QGraphicsLineItem] = []
         self._partition_items: list[QGraphicsPolygonItem] = []
-        self._region_faces: dict[int, set[int]] = {}
+        self._current_face_ids: set[int] = set()
 
         self.scene = QGraphicsScene(self)
         self.scene.setBackgroundBrush(QBrush(QColor(8, 10, 12)))
         self.view = BarrierView(self.scene)
         self.view.barrier_drawn.connect(self._add_barrier)
 
-        self.hint = QLabel("拉线模式关闭：可滚轮缩放、拖动画布。点击“拉线”后，在俯视图上按住鼠标拖出黄色分割线。")
+        self.hint = QLabel("")
         self.hint.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.draw_button = QPushButton("拉线")
         self.clear_button = QPushButton("清空线")
-        self.apply_button = QPushButton("拉线并应用")
+        self.prev_button = QPushButton("上一个")
+        self.next_button = QPushButton("下一个")
+        self.apply_button = QPushButton("应用")
         self.cancel_button = QPushButton("取消")
 
         button_row = QHBoxLayout()
         button_row.addWidget(self.hint, 1)
         button_row.addWidget(self.draw_button)
         button_row.addWidget(self.clear_button)
+        button_row.addWidget(self.prev_button)
+        button_row.addWidget(self.next_button)
         button_row.addWidget(self.apply_button)
         button_row.addWidget(self.cancel_button)
 
@@ -157,41 +163,57 @@ class ManualPartitionDialog(QDialog):
         self.draw_button.setCheckable(True)
         self.draw_button.toggled.connect(self._toggle_draw_mode)
         self.clear_button.clicked.connect(self._clear_barriers)
+        self.prev_button.clicked.connect(self._show_previous_region)
+        self.next_button.clicked.connect(self._show_next_region)
         self.apply_button.clicked.connect(self._apply)
         self.cancel_button.clicked.connect(self.reject)
-        self._load_scene()
+
+        self._load_project()
+        self._load_current_scene()
+
+    def _current_region(self) -> int:
+        return self.selected_regions[self._current_index]
+
+    def _current_barriers(self) -> list[BarrierLine]:
+        return self._barriers_by_region[self._current_region()]
 
     def _toggle_draw_mode(self, enabled: bool) -> None:
         self.view.set_draw_mode(enabled)
-        self.hint.setText("拉线模式开启：按住鼠标左键拖出黄色线段；可画多条线。" if enabled else "拉线模式关闭：可滚轮缩放、拖动画布。")
+        self._update_hint()
 
-    def _load_scene(self) -> None:
-        project = load_project_file(self.input_path)
-        if not project.selected_path_face_regions:
+    def _load_project(self) -> None:
+        self.project = load_project_file(self.input_path)
+        if not self.project.selected_path_face_regions:
             raise RuntimeError("输入项目没有 selected_path_face_regions。")
-        invalid = [region for region in self.selected_regions if region <= 0 or region > len(project.selected_path_face_regions)]
+        invalid = [region for region in self.selected_regions if region <= 0 or region > len(self.project.selected_path_face_regions)]
         if invalid:
-            raise RuntimeError(f"region 超出范围: {invalid}; 当前共有 {len(project.selected_path_face_regions)} 个 region。")
+            raise RuntimeError(f"region 超出范围: {invalid}; 当前共有 {len(self.project.selected_path_face_regions)} 个 region。")
 
-        selected_face_ids = {
-            face_id
-            for region_index, region in enumerate(project.selected_path_face_regions, 1)
-            if region_index in self.selected_regions
-            for face_id in region
-        }
-        self._region_faces = {
-            region_index: {int(face_id) for face_id in region}
-            for region_index, region in enumerate(project.selected_path_face_regions, 1)
-            if region_index in self.selected_regions
-        }
-
-        importer = CadImportService().import_model(project.workpiece.file_path)
+        importer = CadImportService().import_model(self.project.workpiece.file_path)
         reader = create_mesh_reader(importer.display_path, importer.display_format)
         reader.SetFileName(str(importer.display_path))
         reader.Update()
-        triangles = read_triangles(reader.GetOutput(), selected_face_ids)
+        self._polydata = reader.GetOutput()
+
+    def _region_geometry(self, region_index: int):
+        if region_index not in self._geometry_cache:
+            face_ids = {int(face_id) for face_id in self.project.selected_path_face_regions[region_index - 1]}
+            triangles = read_triangles(self._polydata, face_ids)
+            faces = face_geometries_from_triangles(triangles)
+            self._geometry_cache[region_index] = (triangles, faces)
+        return self._geometry_cache[region_index]
+
+    def _load_current_scene(self) -> None:
+        self.scene.clear()
+        self._line_items.clear()
+        self._partition_items.clear()
+        self.draw_button.setChecked(False)
+
+        region_index = self._current_region()
+        triangles, faces = self._region_geometry(region_index)
         self._triangles = triangles
-        self._faces = face_geometries_from_triangles(triangles)
+        self._faces = faces
+        self._current_face_ids = {int(face_id) for face_id in self.project.selected_path_face_regions[region_index - 1]}
 
         fill = QBrush(QColor(225, 232, 238))
         edge = QPen(QColor(88, 96, 104), 0.8)
@@ -206,75 +228,128 @@ class ManualPartitionDialog(QDialog):
             bounds = polygon.boundingRect() if bounds is None else bounds.united(polygon.boundingRect())
 
         if bounds is None:
-            raise RuntimeError("选中的 region 没有可显示的三角面。")
+            raise RuntimeError(f"region {region_index} 没有可显示的三角面。")
         margin = max(bounds.width(), bounds.height()) * 0.06
         self.scene.setSceneRect(bounds.adjusted(-margin, -margin, margin, margin))
         self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
-    def _add_barrier(self, barrier: BarrierLine) -> None:
-        self.barriers.append(barrier)
+        for barrier in self._current_barriers():
+            self._draw_barrier_line(barrier)
+        self._refresh_partition_preview()
+        self._update_nav_buttons()
+        self._update_hint()
+
+    def _draw_barrier_line(self, barrier: BarrierLine) -> None:
         start, end = barrier
         start_scene = scene_point_from_model_xy(start)
         end_scene = scene_point_from_model_xy(end)
         item = self.scene.addLine(start_scene.x(), start_scene.y(), end_scene.x(), end_scene.y(), QPen(QColor(255, 230, 0), 6))
         item.setZValue(30)
         self._line_items.append(item)
+
+    def _add_barrier(self, barrier: BarrierLine) -> None:
+        self._current_barriers().append(barrier)
+        self._draw_barrier_line(barrier)
         self._refresh_partition_preview()
-        self.hint.setText(f"已添加 {len(self.barriers)} 条分割线，当前预览为 {self._preview_patch_count()} 个分区。继续拉线或点击“拉线并应用”。")
+        self._update_hint()
 
     def _preview_patch_count(self) -> int:
-        return sum(len(clip_partitions_from_barriers(region_index, face_ids, self._faces, self.barriers)) for region_index, face_ids in self._region_faces.items())
+        barriers = self._current_barriers()
+        if not barriers:
+            return 1
+        return len(clip_partitions_from_barriers(self._current_region(), self._current_face_ids, self._faces, barriers))
 
     def _refresh_partition_preview(self) -> None:
         for item in self._partition_items:
             self.scene.removeItem(item)
         self._partition_items.clear()
-        if not self.barriers:
+        barriers = self._current_barriers()
+        if not barriers:
             return
 
-        color_index = 0
-        for region_index, face_ids in sorted(self._region_faces.items()):
-            # 这里显示的是规则 UV 裁剪区域，不按稀疏三角面重新拆面；后续轨迹采样也会按这些 clip polygon 过滤点。
-            partitions = sorted(
-                clip_partitions_from_barriers(region_index, face_ids, self._faces, self.barriers),
-                key=lambda partition: 0 if partition.exclude_polygons_model_xy else 1,
-            )
-            for partition in partitions:
-                polygon = QPolygonF([scene_point_from_model_xy(point) for point in partition.clip_polygon_model_xy])
-                item = QGraphicsPolygonItem(polygon)
-                item.setBrush(QBrush(PREVIEW_COLORS[color_index % len(PREVIEW_COLORS)]))
-                item.setPen(QPen(QColor(235, 240, 245, 180), 1.2))
-                item.setZValue(10)
-                self.scene.addItem(item)
-                self._partition_items.append(item)
-                color_index += 1
+        partitions = sorted(
+            clip_partitions_from_barriers(self._current_region(), self._current_face_ids, self._faces, barriers),
+            key=lambda partition: 0 if partition.exclude_polygons_model_xy else 1,
+        )
+        for color_index, partition in enumerate(partitions):
+            polygon = QPolygonF([scene_point_from_model_xy(point) for point in partition.clip_polygon_model_xy])
+            item = QGraphicsPolygonItem(polygon)
+            item.setBrush(QBrush(PREVIEW_COLORS[color_index % len(PREVIEW_COLORS)]))
+            item.setPen(QPen(QColor(235, 240, 245, 180), 1.2))
+            item.setZValue(10)
+            self.scene.addItem(item)
+            self._partition_items.append(item)
 
     def _clear_barriers(self) -> None:
-        self.barriers.clear()
+        self._barriers_by_region[self._current_region()] = []
         for item in self._line_items:
             self.scene.removeItem(item)
         self._line_items.clear()
         self._refresh_partition_preview()
-        self.hint.setText("已清空分割线。")
+        self._update_hint()
+
+    def _show_previous_region(self) -> None:
+        if self._current_index <= 0:
+            return
+        self._current_index -= 1
+        self._load_current_scene()
+
+    def _show_next_region(self) -> None:
+        if self._current_index >= len(self.selected_regions) - 1:
+            return
+        self._current_index += 1
+        self._load_current_scene()
+
+    def _update_nav_buttons(self) -> None:
+        multiple = len(self.selected_regions) > 1
+        self.prev_button.setEnabled(multiple and self._current_index > 0)
+        self.next_button.setEnabled(multiple and self._current_index < len(self.selected_regions) - 1)
+        self.prev_button.setVisible(multiple)
+        self.next_button.setVisible(multiple)
+
+    def _update_hint(self) -> None:
+        region_index = self._current_region()
+        barriers = len(self._current_barriers())
+        draw_state = "拉线模式开启" if self.draw_button.isChecked() else "拉线模式关闭"
+        page = f"{self._current_index + 1}/{len(self.selected_regions)}"
+        self.hint.setText(
+            f"{draw_state} | 当前 region {region_index} ({page}) | "
+            f"分割线 {barriers} 条 | 预览分区 {self._preview_patch_count()} 个"
+        )
 
     def _apply(self) -> None:
-        if not self.barriers:
-            QMessageBox.warning(self, "没有分割线", "请先点击“拉线”，在俯视图上画至少一条分割线。")
+        missing = [region for region in self.selected_regions if not self._barriers_by_region.get(region)]
+        if missing:
+            QMessageBox.warning(self, "还有 region 未拉线", f"请先完成这些 region 的拉线: {missing}")
             return
         try:
-            project = load_project_file(self.input_path)
-            records = manual_clip_manifest_records(project.selected_path_face_regions, self.selected_regions, self._faces, self.barriers)
-            output_project = deepcopy(project)
+            output_project = deepcopy(self.project)
             save_project_file(self.output_path, output_project)
+
+            records: list[dict] = []
+            for region_index in self.selected_regions:
+                _triangles, faces = self._region_geometry(region_index)
+                records.extend(
+                    manual_clip_manifest_records(
+                        self.project.selected_path_face_regions,
+                        {region_index},
+                        faces,
+                        self._barriers_by_region[region_index],
+                    )
+                )
+
             manifest = {
                 "schema": "base_casting_abb6700.manual_region_partition_manifest",
                 "version": 2,
                 "input_project": str(self.input_path),
                 "output_project": str(self.output_path),
-                "selected_regions": sorted(self.selected_regions),
-                "barriers_model_xy": [[list(start), list(end)] for start, end in self.barriers],
-                "input_region_count": len(project.selected_path_face_regions),
-                "output_region_count": len(project.selected_path_face_regions),
+                "selected_regions": self.selected_regions,
+                "barriers_by_region": {
+                    str(region): [[list(start), list(end)] for start, end in barriers]
+                    for region, barriers in self._barriers_by_region.items()
+                },
+                "input_region_count": len(self.project.selected_path_face_regions),
+                "output_region_count": len(self.project.selected_path_face_regions),
                 "clip_patch_count": sum(record["output_patch_count"] for record in records),
                 "records": records,
             }
