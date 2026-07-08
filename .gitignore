@@ -1,0 +1,13 @@
+# Python/cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Generated experiment outputs
+results/*
+!results/.gitkeep
+
+# Local temporary files
+tmp/
+*.log
