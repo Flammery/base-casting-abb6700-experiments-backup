@@ -90,6 +90,8 @@ class BarrierView(QGraphicsView):
         self._rubber_polygon: QGraphicsPolygonItem | None = None
         self._polygon_points: list[QPointF] = []
         self._polygon_items: list[QGraphicsLineItem] = []
+        self._polygon_preview_item: QGraphicsPolygonItem | None = None
+        self._snap_radius_px = 14.0
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -115,7 +117,7 @@ class BarrierView(QGraphicsView):
                 self._finish_polygon()
                 return
             if event.button() == Qt.MouseButton.LeftButton:
-                self._add_polygon_point(self.mapToScene(event.position().toPoint()))
+                self._add_polygon_point(self._snap_polygon_point(self.mapToScene(event.position().toPoint())))
                 return
         if self._draw_mode not in ("line", "rect") or event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
@@ -185,22 +187,60 @@ class BarrierView(QGraphicsView):
         super().mouseDoubleClickEvent(event)
 
     def _add_polygon_point(self, point: QPointF) -> None:
+        if len(self._polygon_points) >= 3 and self._is_near(point, self._polygon_points[0]):
+            self._finish_polygon()
+            return
+        if self._polygon_points and self._is_near(point, self._polygon_points[-1]):
+            return
         if self._polygon_points:
             previous = self._polygon_points[-1]
             item = self.scene().addLine(previous.x(), previous.y(), point.x(), point.y(), QPen(QColor(255, 70, 70), 3))
             item.setZValue(35)
             self._polygon_items.append(item)
         self._polygon_points.append(point)
+        self._refresh_polygon_preview()
 
     def _finish_polygon(self, cancel: bool = False) -> None:
         points = self._polygon_points
         items = self._polygon_items
+        preview_item = self._polygon_preview_item
         self._polygon_points = []
         self._polygon_items = []
+        self._polygon_preview_item = None
         for item in items:
-            self.scene().removeItem(item)
+            if item.scene() is not None:
+                self.scene().removeItem(item)
+        if preview_item is not None and preview_item.scene() is not None:
+            self.scene().removeItem(preview_item)
         if not cancel and len(points) >= 3:
             self.polygon_drawn.emit([model_xy_from_scene_point(point) for point in points])
+
+    def _snap_polygon_point(self, point: QPointF) -> QPointF:
+        if not self._polygon_points:
+            return point
+        nearest = min(self._polygon_points, key=lambda existing: _distance_scene(existing, point))
+        return QPointF(nearest) if self._is_near(point, nearest) else point
+
+    def _is_near(self, a: QPointF, b: QPointF) -> bool:
+        return _distance_scene(a, b) <= self._snap_radius_scene()
+
+    def _snap_radius_scene(self) -> float:
+        scale = max(abs(self.transform().m11()), abs(self.transform().m22()), 1e-6)
+        return self._snap_radius_px / scale
+
+    def _refresh_polygon_preview(self) -> None:
+        if len(self._polygon_points) < 3:
+            return
+        polygon = QPolygonF(self._polygon_points)
+        if self._polygon_preview_item is None:
+            self._polygon_preview_item = self.scene().addPolygon(
+                polygon,
+                QPen(QColor(255, 70, 70), 1.8),
+                QBrush(QColor(255, 70, 70, 45)),
+            )
+            self._polygon_preview_item.setZValue(34)
+            return
+        self._polygon_preview_item.setPolygon(polygon)
 
 
 def _scene_rect_points(start: QPointF, end: QPointF) -> list[QPointF]:
@@ -214,6 +254,12 @@ def _scene_rect_points(start: QPointF, end: QPointF) -> list[QPointF]:
 
 def _scene_rect_polygon(start: QPointF, end: QPointF) -> QPolygonF:
     return QPolygonF(_scene_rect_points(start, end))
+
+
+def _distance_scene(a: QPointF, b: QPointF) -> float:
+    dx = a.x() - b.x()
+    dy = a.y() - b.y()
+    return (dx * dx + dy * dy) ** 0.5
 
 
 class ManualPartitionDialog(QDialog):
@@ -531,7 +577,7 @@ class ManualPartitionDialog(QDialog):
                 state = "圈选关闭"
             self.hint.setText(
                 f"{state} | 当前 region {region_index} ({page}) | "
-                f"圈选区域 {len(self._current_picked_polygons())} 个 | 预览分区 {self._preview_patch_count()} 个"
+                f"圈选区域 {len(self._current_picked_polygons())} 个 | 预览分区 {self._preview_patch_count()} 个 | 靠近起点自动闭合"
             )
             return
         barriers = len(self._current_barriers())
