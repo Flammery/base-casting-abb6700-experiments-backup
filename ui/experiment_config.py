@@ -84,6 +84,8 @@ def scan_axis_for_coordinates(x_text: str, y_text: str, z_text: str) -> str:
 def angle_args(preset: str) -> list[str]:
     if preset == "地轨 0,180":
         return ["--experiment-mode", "rail", "--angles", "0,180"]
+    if preset == "地轨 90,270":
+        return ["--experiment-mode", "rail", "--angles", "90,270"]
     if preset == "转台 0..360 step10":
         return ["--experiment-mode", "turntable", "--angles-range", "0,360,10"]
     raise ValueError(f"未知旋转预设: {preset}")

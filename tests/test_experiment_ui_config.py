@@ -51,6 +51,7 @@ def test_angle_preset_arguments() -> None:
     module = _load_ui_config_module()
 
     assert module.angle_args("地轨 0,180") == ["--experiment-mode", "rail", "--angles", "0,180"]
+    assert module.angle_args("地轨 90,270") == ["--experiment-mode", "rail", "--angles", "90,270"]
     assert module.angle_args("转台 0..360 step10") == [
         "--experiment-mode",
         "turntable",

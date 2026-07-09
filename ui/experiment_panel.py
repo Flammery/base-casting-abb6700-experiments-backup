@@ -78,7 +78,7 @@ class ExperimentPanel(QWidget):
         self.start_button = QPushButton("开始")
 
         self.angle_preset = QComboBox()
-        self.angle_preset.addItems(["地轨 0,180", "转台 0..360 step10"])
+        self.angle_preset.addItems(["地轨 0,180", "地轨 90,270", "转台 0..360 step10"])
         self.angle_preset.setMinimumWidth(150)
 
         self.model_x = self._coord_edit(DEFAULT_X)
@@ -174,7 +174,7 @@ class ExperimentPanel(QWidget):
     def _sync_mode_defaults(self, mode: str) -> None:
         if mode == "转台 0..360 step10" and self.model_y.text().strip() in ("", DEFAULT_Y):
             self.model_y.setText("0")
-        elif mode == "地轨 0,180" and self.model_y.text().strip() in ("", "0"):
+        elif mode in ("地轨 0,180", "地轨 90,270") and self.model_y.text().strip() in ("", "0"):
             self.model_y.setText(DEFAULT_Y)
 
     def apply_partition(self) -> None:
