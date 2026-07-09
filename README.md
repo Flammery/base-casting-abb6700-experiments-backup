@@ -160,6 +160,28 @@ python experiments\base_casting_abb6700\scripts\runs\optimal_y_score_x3500_z440.
 - RAPID 导出使用 base window、boundary-UV raster、`base_y_aligned` 姿态、固定
   confdata 和 `ConfL \Off;`。
 
+## STEP/CAD precise-surface experiment entry
+
+The existing STL/VTK workflow remains unchanged. STEP/CAD v1 is an independent
+experimental path through `scripts/step_cad_pipeline.py`; it reads SolidWorks
+`STEP AP242` with OpenCascade, indexes CAD faces with geometry signatures, and
+samples path points directly from B-Rep surfaces instead of interpolating STL
+triangles.
+
+Basic flow:
+
+```powershell
+python experiments\base_casting_abb6700\scripts\step_cad_pipeline.py index --step part.step --manifest part.step_manifest.json
+python experiments\base_casting_abb6700\scripts\step_cad_pipeline.py pick --manifest part.step_manifest.json --regions 1 --polygons-json picks.json --output part.step_pick_manifest.json
+python experiments\base_casting_abb6700\scripts\step_cad_pipeline.py sample --step part.step --manifest part.step_pick_manifest.json --output samples.json --spacing 20 --point-step 20
+```
+
+`index` writes `source_step`, CAD face signatures, and empty selection fields.
+`pick` attaches `selected_cad_face_regions` and `n_1/n_2` clip patches. `sample`
+uses OpenCascade trimmed-face classification, so holes are excluded by CAD
+topology and the generated points include model-space position, normal, tangent,
+and UV.
+
 ## 测试
 
 运行本实验目录测试：
