@@ -4,24 +4,33 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-from vtkmodules.vtkCommonCore import vtkPoints, vtkUnsignedCharArray
-from vtkmodules.vtkCommonDataModel import vtkCellArray, vtkPolyData
+from vtkmodules.util.numpy_support import numpy_to_vtk
+from vtkmodules.vtkCommonCore import VTK_UNSIGNED_CHAR, vtkFloatArray, vtkPoints, vtkUnsignedCharArray
+from vtkmodules.vtkCommonDataModel import vtkCellArray, vtkImageData, vtkPolyData
 from vtkmodules.vtkInteractionStyle import vtkInteractorStyleTrackballCamera
-from vtkmodules.vtkRenderingCore import vtkActor, vtkPolyDataMapper, vtkRenderer, vtkTextActor
+from vtkmodules.vtkRenderingCore import vtkActor, vtkPolyDataMapper, vtkRenderer, vtkTextActor, vtkTexture
 import vtkmodules.vtkRenderingOpenGL2  # noqa: F401
 
 EXPERIMENT_DIR = Path(__file__).resolve().parents[1]
 ROOT = EXPERIMENT_DIR.parents[1]
 SRC = ROOT / "src"
+SCRIPT_DIR = EXPERIMENT_DIR / "scripts"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
 from robot_studio_qt.cad.import_service import CadImportService  # noqa: E402
 from robot_studio_qt.cad.mesh_io import create_mesh_reader  # noqa: E402
 from robot_studio_qt.project import load_project_file  # noqa: E402
+from robot_studio_qt.path_planning.mesh_raster import read_triangles  # noqa: E402
+from raster_domain import point_to_uv  # noqa: E402
 
 
 DEFAULT_COLOR = (150, 158, 168)
@@ -91,6 +100,8 @@ class RegionPreview(QWidget):
         self.setMinimumHeight(360)
         self._actor: vtkActor | None = None
         self._path_actor: vtkActor | None = None
+        self._texture_actors: list[vtkActor] = []
+        self._texture_data: list[object] = []
         self._reader = None
 
         self.renderer = vtkRenderer()
@@ -129,8 +140,12 @@ class RegionPreview(QWidget):
             reader.Update()
             polydata = reader.GetOutput()
             regions = [set(region) for region in project.selected_path_face_regions]
+            raster_groups = self._raster_groups(project_path, regions)
             clip_patches = self._manual_clip_patches(project_path, regions)
-            if clip_patches:
+            if raster_groups:
+                self._apply_region_colors(polydata, [])
+                message = f"{project_path.name} | raster patches: {sum(len(group['patches']) for group in raster_groups)}"
+            elif clip_patches:
                 self._apply_clip_patch_colors(polydata, clip_patches)
                 labels = ",".join(str(patch["label"]) for patch in clip_patches[:6])
                 suffix = "..." if len(clip_patches) > 6 else ""
@@ -139,6 +154,8 @@ class RegionPreview(QWidget):
                 self._apply_region_colors(polydata, regions)
                 message = f"{project_path.name} | regions: {len(regions)}"
             self._show_polydata(reader)
+            if raster_groups:
+                self._show_raster_textures(polydata, raster_groups)
             self.set_message(message)
         except Exception as exc:
             self.set_message(f"预览加载失败: {exc}")
@@ -146,6 +163,10 @@ class RegionPreview(QWidget):
     def _show_polydata(self, reader) -> None:
         if self._actor is not None:
             self.renderer.RemoveActor(self._actor)
+        for texture_actor in self._texture_actors:
+            self.renderer.RemoveActor(texture_actor)
+        self._texture_actors.clear()
+        self._texture_data.clear()
         mapper = vtkPolyDataMapper()
         mapper.SetInputConnection(reader.GetOutputPort())
         mapper.SetScalarModeToUseCellData()
@@ -209,6 +230,109 @@ class RegionPreview(QWidget):
         self.vtk_widget.GetRenderWindow().Render()
         self.set_message(f"path preview: {point_count} points / {run_count} continuous runs")
 
+    def _raster_groups(self, project_path: Path, regions: list[set[int]]) -> list[dict]:
+        manifest_path = manual_manifest_path_for(project_path)
+        if not manifest_path.exists():
+            return []
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        if manifest.get("schema") != "base_casting_abb6700.manual_region_partition_manifest" or int(manifest.get("version", 0)) != 2:
+            return []
+        groups = []
+        for record in manifest.get("records", []):
+            source_region = int(record.get("original_region", 0))
+            chart = record.get("raster_chart")
+            patches = [patch for patch in record.get("patches", []) if patch.get("clip_polygon")]
+            if chart and patches and 0 < source_region <= len(regions):
+                groups.append({"face_ids": regions[source_region - 1], "chart": chart, "patches": patches})
+        return groups
+
+    def _show_raster_textures(self, polydata, groups: list[dict]) -> None:
+        """Paint PySide partition masks and texture them onto the unchanged STL."""
+        for group in groups:
+            patches, chart = group["patches"], group["chart"]
+            all_points = [point for patch in patches for point in patch["clip_polygon"]]
+            if not all_points:
+                continue
+            u_min, u_max = min(point[0] for point in all_points), max(point[0] for point in all_points)
+            v_min, v_max = min(point[1] for point in all_points), max(point[1] for point in all_points)
+            u_pad = max((u_max - u_min) * 0.02, 1e-6)
+            v_pad = max((v_max - v_min) * 0.02, 1e-6)
+            u_min, u_max = u_min - u_pad, u_max + u_pad
+            v_min, v_max = v_min - v_pad, v_max + v_pad
+            u_span, v_span = max(u_max - u_min, 1e-9), max(v_max - v_min, 1e-9)
+            size = 1024
+            image = QImage(size, size, QImage.Format.Format_RGBA8888)
+            image.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(image)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+            def image_polygon(polygon):
+                return QPolygonF(
+                    [QPointF((point[0] - u_min) / u_span * (size - 1), (v_max - point[1]) / v_span * (size - 1)) for point in polygon]
+                )
+
+            ordered = sorted(enumerate(patches), key=lambda item: 0 if item[1].get("exclude_polygons") else 1)
+            for patch_index, patch in ordered:
+                color = PALETTE[patch_index % len(PALETTE)]
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+                painter.setPen(QPen(Qt.PenStyle.NoPen))
+                painter.setBrush(QBrush(QColor(*color, 210)))
+                painter.drawPolygon(image_polygon(patch["clip_polygon"]))
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+                for excluded in patch.get("exclude_polygons") or []:
+                    painter.drawPolygon(image_polygon(excluded))
+            painter.end()
+
+            overlay, tcoords = self._textured_region_mesh(polydata, group["face_ids"], chart, u_min, u_span, v_max, v_span)
+            overlay.GetPointData().SetTCoords(tcoords)
+            vtk_image = vtkImageData()
+            vtk_image.SetDimensions(size, size, 1)
+            rgba = np.frombuffer(image.bits(), dtype=np.uint8, count=image.sizeInBytes()).reshape((-1, 4)).copy()
+            scalars = numpy_to_vtk(rgba, deep=True, array_type=VTK_UNSIGNED_CHAR)
+            scalars.SetNumberOfComponents(4)
+            vtk_image.GetPointData().SetScalars(scalars)
+            texture = vtkTexture()
+            texture.SetInputData(vtk_image)
+            texture.InterpolateOn()
+            texture.RepeatOff()
+            mapper = vtkPolyDataMapper()
+            mapper.SetInputData(overlay)
+            mapper.ScalarVisibilityOff()
+            mapper.SetResolveCoincidentTopologyToPolygonOffset()
+            actor = vtkActor()
+            actor.SetMapper(mapper)
+            actor.SetTexture(texture)
+            actor.ForceTranslucentOn()
+            actor.GetProperty().SetAmbient(0.45)
+            actor.GetProperty().SetDiffuse(0.65)
+            self.renderer.AddActor(actor)
+            self._texture_actors.append(actor)
+            self._texture_data.extend([image, overlay, tcoords, vtk_image, scalars, texture, mapper])
+        self.vtk_widget.GetRenderWindow().Render()
+
+    @staticmethod
+    def _textured_region_mesh(polydata, face_ids, chart, u_min, u_span, v_max, v_span):
+        points = vtkPoints()
+        polys = vtkCellArray()
+        tcoords = vtkFloatArray()
+        tcoords.SetNumberOfComponents(2)
+        for triangle in read_triangles(polydata, face_ids):
+            ids = []
+            for point in triangle.points:
+                ids.append(points.InsertNextPoint(*point))
+                u, v = point_to_uv(point, chart)
+                tcoords.InsertNextTuple2((u - u_min) / u_span, (v_max - v) / v_span)
+            polys.InsertNextCell(3)
+            for point_id in ids:
+                polys.InsertCellPoint(point_id)
+        output = vtkPolyData()
+        output.SetPoints(points)
+        output.SetPolys(polys)
+        return output, tcoords
+
     def _manual_clip_patches(self, project_path: Path, regions: list[set[int]]) -> list[dict]:
         manifest_path = manual_manifest_path_for(project_path)
         if not manifest_path.exists():
@@ -218,6 +342,10 @@ class RegionPreview(QWidget):
         except Exception:
             return []
         if manifest.get("schema") != "base_casting_abb6700.manual_region_partition_manifest":
+            return []
+        # Raster-domain partitions are represented by their preview paths, not
+        # by coloring whole STL cells. The mesh remains only the lift/normal source.
+        if int(manifest.get("version", 0)) == 2 and any(record.get("raster_chart") for record in manifest.get("records", [])):
             return []
 
         patches: list[dict] = []

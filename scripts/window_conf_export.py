@@ -11,8 +11,11 @@ from pathlib import Path
 EXPERIMENT_DIR = Path(__file__).resolve().parents[1]
 ROOT = EXPERIMENT_DIR.parents[1]
 SRC = ROOT / "src"
+SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
 from robot_studio_qt.cad.import_service import CadImportService
 from robot_studio_qt.cad.mesh_io import create_mesh_reader
@@ -40,6 +43,7 @@ from robot_studio_qt.path_planning.models import (
 from robot_studio_qt.path_planning.transforms import WorkpieceTransform
 from robot_studio_qt.polishing_tool import tool_to_rapid
 from robot_studio_qt.project import load_project_file, save_project_file
+from raster_domain import point_to_uv, raster_samples
 
 
 PARTITIONED_PROJECT_PATH = EXPERIMENT_DIR / "inputs" / "latest_partitioned.rsp.json"
@@ -131,6 +135,7 @@ def manual_clip_regions(project_path: Path, regions: list[set[int]]) -> list[dic
                 "face_ids": region,
                 "clip_polygon": None,
                 "exclude_polygons": [],
+                "raster_chart": None,
             }
             for index, region in enumerate(regions, 1)
         ]
@@ -153,6 +158,7 @@ def manual_clip_regions(project_path: Path, regions: list[set[int]]) -> list[dic
                 "face_ids": region,
                 "clip_polygon": None,
                 "exclude_polygons": [],
+                "raster_chart": None,
             }
             for index, region in enumerate(regions, 1)
         ]
@@ -175,6 +181,7 @@ def manual_clip_regions(project_path: Path, regions: list[set[int]]) -> list[dic
                     "face_ids": set(regions[source_region - 1]),
                     "clip_polygon": clip_polygon,
                     "exclude_polygons": patch.get("exclude_polygons") or [],
+                    "raster_chart": patch.get("raster_chart") or record.get("raster_chart"),
                 }
             )
             appended = True
@@ -183,7 +190,7 @@ def manual_clip_regions(project_path: Path, regions: list[set[int]]) -> list[dic
     for index, region in enumerate(regions, 1):
         if index in patched_sources:
             continue
-        clip_regions.append({"source_region": index, "label": str(index), "face_ids": region, "clip_polygon": None, "exclude_polygons": []})
+        clip_regions.append({"source_region": index, "label": str(index), "face_ids": region, "clip_polygon": None, "exclude_polygons": [], "raster_chart": None})
     return clip_regions
 
 
@@ -265,6 +272,7 @@ def clip_region_vertices(
     face_ids: set[int],
     clip_polygon: list[list[float]] | None,
     exclude_polygons: list[list[list[float]]] | None = None,
+    raster_chart: dict | None = None,
 ) -> list[tuple[float, float, float]]:
     vertices: list[tuple[float, float, float]] = []
     for triangle in read_triangles(polydata, face_ids):
@@ -272,7 +280,9 @@ def clip_region_vertices(
             sum(point[0] for point in triangle.points) / 3.0,
             sum(point[1] for point in triangle.points) / 3.0,
         )
-        if not point_allowed_by_clip(centroid, clip_polygon, exclude_polygons):
+        center_3d = (*centroid, sum(point[2] for point in triangle.points) / 3.0)
+        clip_point = point_to_uv(center_3d, raster_chart) if raster_chart else centroid
+        if not point_allowed_by_clip(clip_point, clip_polygon, exclude_polygons):
             continue
         vertices.extend(triangle.points)
     return vertices
@@ -595,26 +605,44 @@ def plan_region_uv(
     feed_variant: RasterFeedDirection,
     clip_polygon: list[list[float]] | None = None,
     exclude_polygons: list[list[list[float]]] | None = None,
+    raster_chart: dict | None = None,
 ) -> PathResult:
     # 对单个 region 独立生成光栅路径，路径姿态由 base_y_aligned 统一决定。
     triangles = read_triangles(polydata, region)
     if not triangles:
         return PathResult(PathSource.MESH, placement.name, base_settings, message="Mesh has no selected triangular surface cells.")
-    normal = average_normal(triangles)
-    origin = mesh_centroid(triangles)
-    long_axis, short_axis, _long_range, _short_range = uv_axes_from_region(triangles)
-    if feed_variant == RasterFeedDirection.LONG_SIDE:
-        u_axis = long_axis
-        v_axis = normalize(cross(normal, u_axis), fallback=short_axis)
-    else:
-        u_axis = short_axis
-        v_axis = normalize(cross(normal, u_axis), fallback=long_axis)
     settings = replace(base_settings, feed_direction=feed_variant)
-    projected = [project_triangle(triangle, origin, u_axis, v_axis) for triangle in triangles]
-    samples = sample_projected_mesh(projected, settings)
-    if clip_polygon or exclude_polygons:
-        samples = [sample for sample in samples if point_allowed_by_clip((sample[3][0], sample[3][1]), clip_polygon, exclude_polygons)]
-    samples = split_discontinuous_raster_segments(samples, settings.point_step)
+    if raster_chart and clip_polygon:
+        domain_samples = raster_samples(
+            clip_polygon,
+            exclude_polygons or [],
+            triangles,
+            raster_chart,
+            settings.spacing,
+            settings.point_step,
+            settings.boundary_margin,
+            settings.bidirectional,
+            feed_variant == RasterFeedDirection.LONG_SIDE,
+        )
+        samples = [
+            (encoded_raster_line_id(segment_id, line_id), point_id, face_id, point_model, normal_model)
+            for segment_id, line_id, point_id, face_id, point_model, normal_model in domain_samples
+        ]
+    else:
+        normal = average_normal(triangles)
+        origin = mesh_centroid(triangles)
+        long_axis, short_axis, _long_range, _short_range = uv_axes_from_region(triangles)
+        if feed_variant == RasterFeedDirection.LONG_SIDE:
+            u_axis = long_axis
+            v_axis = normalize(cross(normal, u_axis), fallback=short_axis)
+        else:
+            u_axis = short_axis
+            v_axis = normalize(cross(normal, u_axis), fallback=long_axis)
+        projected = [project_triangle(triangle, origin, u_axis, v_axis) for triangle in triangles]
+        samples = sample_projected_mesh(projected, settings)
+        if clip_polygon or exclude_polygons:
+            samples = [sample for sample in samples if point_allowed_by_clip((sample[3][0], sample[3][1]), clip_polygon, exclude_polygons)]
+        samples = split_discontinuous_raster_segments(samples, settings.point_step)
     if not samples:
         return PathResult(PathSource.MESH, placement.name, settings, message="No raster samples were generated.")
 
@@ -721,7 +749,7 @@ def main() -> None:
         tool_name=project.polishing_tool.name,
     )
     vertices_by_region = {
-        index: clip_region_vertices(polydata, item["face_ids"], item.get("clip_polygon"), item.get("exclude_polygons"))
+        index: clip_region_vertices(polydata, item["face_ids"], item.get("clip_polygon"), item.get("exclude_polygons"), item.get("raster_chart"))
         for index, item in enumerate(planning_regions, 1)
     }
 
@@ -759,6 +787,7 @@ def main() -> None:
                         feed_variant,
                         planning_region.get("clip_polygon"),
                         planning_region.get("exclude_polygons"),
+                        planning_region.get("raster_chart"),
                     )
                     if path.waypoints:
                         row = export_path_variant(project, placement, path, angle, region_index, variant_name, region_label)

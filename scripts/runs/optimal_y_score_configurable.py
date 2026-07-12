@@ -313,7 +313,7 @@ def run_optimal_scan(
 
     settings = runner.planner_settings(project)
     vertices_by_region = {
-        index: runner.base.clip_region_vertices(polydata, item["face_ids"], item.get("clip_polygon"), item.get("exclude_polygons"))
+        index: runner.base.clip_region_vertices(polydata, item["face_ids"], item.get("clip_polygon"), item.get("exclude_polygons"), item.get("raster_chart"))
         for index, item in enumerate(planning_regions, 1)
     }
 
@@ -373,6 +373,7 @@ def run_optimal_scan(
                         feed_variant,
                         planning_region.get("clip_polygon"),
                         planning_region.get("exclude_polygons"),
+                        planning_region.get("raster_chart"),
                     )
                     if path.waypoints:
                         row = runner.base.export_path_variant(project, placement, path, angle, region_index, variant_name, planning_region["label"])

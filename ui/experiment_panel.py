@@ -239,6 +239,7 @@ class ExperimentPanel(QWidget):
                     path_preview_backend.RasterFeedDirection.LONG_SIDE,
                     planning_region.get("clip_polygon"),
                     planning_region.get("exclude_polygons"),
+                    planning_region.get("raster_chart"),
                 )
                 if result.waypoints:
                     paths.append(result)

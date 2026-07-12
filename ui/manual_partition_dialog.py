@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QDialog,
     QGraphicsLineItem,
@@ -45,6 +45,7 @@ from manual_region_partitioning import (  # noqa: E402
     manual_pick_manifest_records,
 )
 from region_partitioning import face_geometries_from_triangles  # noqa: E402
+from raster_domain import chart_from_triangles, projected_triangles  # noqa: E402
 
 
 PREVIEW_COLORS = [
@@ -92,8 +93,9 @@ class BarrierView(QGraphicsView):
         self._polygon_items: list[QGraphicsLineItem] = []
         self._polygon_preview_item: QGraphicsPolygonItem | None = None
         self._snap_radius_px = 14.0
+        self._rotate_anchor: QPointF | None = None
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
 
     def set_draw_mode(self, enabled: bool) -> None:
@@ -104,7 +106,7 @@ class BarrierView(QGraphicsView):
             self._finish_polygon(cancel=True)
         self._draw_mode = mode
         enabled = mode != "none"
-        self.setDragMode(QGraphicsView.DragMode.NoDrag if enabled else QGraphicsView.DragMode.ScrollHandDrag)
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setCursor(Qt.CursorShape.CrossCursor if enabled else Qt.CursorShape.ArrowCursor)
 
     def wheelEvent(self, event) -> None:  # noqa: N802
@@ -112,6 +114,10 @@ class BarrierView(QGraphicsView):
         self.scale(factor, factor)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
+        if self._draw_mode == "none" and event.button() == Qt.MouseButton.LeftButton:
+            self._rotate_anchor = event.position()
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+            return
         if self._draw_mode == "polygon":
             if event.button() == Qt.MouseButton.RightButton:
                 self._finish_polygon()
@@ -137,6 +143,11 @@ class BarrierView(QGraphicsView):
             self._rubber_polygon.setZValue(35)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._rotate_anchor is not None:
+            delta = event.position().x() - self._rotate_anchor.x()
+            self.rotate(delta * 0.35)
+            self._rotate_anchor = event.position()
+            return
         if self._draw_mode == "line" and self._start is not None and self._rubber_line is not None:
             point = self.mapToScene(event.position().toPoint())
             self._rubber_line.setLine(self._start.x(), self._start.y(), point.x(), point.y())
@@ -148,6 +159,10 @@ class BarrierView(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and self._rotate_anchor is not None:
+            self._rotate_anchor = None
+            self.setCursor(Qt.CursorShape.CrossCursor if self._draw_mode != "none" else Qt.CursorShape.ArrowCursor)
+            return
         if self._draw_mode == "line" and self._start is not None and self._rubber_line is not None:
             end = self.mapToScene(event.position().toPoint())
             start = self._start
@@ -185,6 +200,12 @@ class BarrierView(QGraphicsView):
             self._finish_polygon()
             return
         super().mouseDoubleClickEvent(event)
+
+    def rotate_quarter(self) -> None:
+        self.rotate(90.0)
+
+    def flip_horizontal(self) -> None:
+        self.scale(-1.0, 1.0)
 
     def _add_polygon_point(self, point: QPointF) -> None:
         if len(self._polygon_points) >= 3 and self._is_near(point, self._polygon_points[0]):
@@ -300,6 +321,8 @@ class ManualPartitionDialog(QDialog):
         self.polygon_button = QPushButton("多边形")
         self.clear_button = QPushButton("清空线")
         self.clear_pick_button = QPushButton("清空区域")
+        self.rotate_button = QPushButton("旋转90°")
+        self.flip_button = QPushButton("翻面")
         self.prev_button = QPushButton("上一个")
         self.next_button = QPushButton("下一个")
         self.apply_button = QPushButton("应用")
@@ -312,6 +335,8 @@ class ManualPartitionDialog(QDialog):
         button_row.addWidget(self.polygon_button)
         button_row.addWidget(self.clear_button)
         button_row.addWidget(self.clear_pick_button)
+        button_row.addWidget(self.rotate_button)
+        button_row.addWidget(self.flip_button)
         button_row.addWidget(self.prev_button)
         button_row.addWidget(self.next_button)
         button_row.addWidget(self.apply_button)
@@ -329,6 +354,8 @@ class ManualPartitionDialog(QDialog):
         self.polygon_button.toggled.connect(self._toggle_polygon_mode)
         self.clear_button.clicked.connect(self._clear_barriers)
         self.clear_pick_button.clicked.connect(self._clear_picked_polygons)
+        self.rotate_button.clicked.connect(self.view.rotate_quarter)
+        self.flip_button.clicked.connect(self.view.flip_horizontal)
         self.prev_button.clicked.connect(self._show_previous_region)
         self.next_button.clicked.connect(self._show_next_region)
         self.apply_button.clicked.connect(self._apply)
@@ -395,9 +422,11 @@ class ManualPartitionDialog(QDialog):
     def _region_geometry(self, region_index: int):
         if region_index not in self._geometry_cache:
             face_ids = {int(face_id) for face_id in self.project.selected_path_face_regions[region_index - 1]}
-            triangles = read_triangles(self._polydata, face_ids)
+            source_triangles = read_triangles(self._polydata, face_ids)
+            chart = chart_from_triangles(source_triangles)
+            triangles = projected_triangles(source_triangles, chart)
             faces = face_geometries_from_triangles(triangles)
-            self._geometry_cache[region_index] = (triangles, faces)
+            self._geometry_cache[region_index] = (source_triangles, triangles, faces, chart)
         return self._geometry_cache[region_index]
 
     def _load_current_scene(self) -> None:
@@ -409,24 +438,24 @@ class ManualPartitionDialog(QDialog):
         self.polygon_button.setChecked(False)
 
         region_index = self._current_region()
-        triangles, faces = self._region_geometry(region_index)
+        source_triangles, triangles, faces, chart = self._region_geometry(region_index)
+        self._source_triangles = source_triangles
         self._triangles = triangles
         self._faces = faces
+        self._raster_chart = chart
         self._current_face_ids = {int(face_id) for face_id in self.project.selected_path_face_regions[region_index - 1]}
 
-        fill = QBrush(QColor(225, 232, 238))
-        edge = QPen(QColor(88, 96, 104), 0.8)
-        bounds: QRectF | None = None
+        domain_path = QPainterPath()
+        domain_path.setFillRule(Qt.FillRule.WindingFill)
         for triangle in triangles:
             polygon = QPolygonF([scene_point_from_model_xy((point[0], point[1])) for point in triangle.points])
-            item = QGraphicsPolygonItem(polygon)
-            item.setBrush(fill)
-            item.setPen(edge)
-            item.setZValue(0)
-            self.scene.addItem(item)
-            bounds = polygon.boundingRect() if bounds is None else bounds.united(polygon.boundingRect())
+            domain_path.addPolygon(polygon)
+            domain_path.closeSubpath()
+        item = self.scene.addPath(domain_path, QPen(Qt.PenStyle.NoPen), QBrush(QColor(225, 232, 238)))
+        item.setZValue(0)
+        bounds = domain_path.boundingRect()
 
-        if bounds is None:
+        if bounds.isEmpty():
             raise RuntimeError(f"region {region_index} 没有可显示的三角面。")
         margin = max(bounds.width(), bounds.height()) * 0.06
         self.scene.setSceneRect(bounds.adjusted(-margin, -margin, margin, margin))
@@ -577,14 +606,14 @@ class ManualPartitionDialog(QDialog):
                 state = "圈选关闭"
             self.hint.setText(
                 f"{state} | 当前 region {region_index} ({page}) | "
-                f"圈选区域 {len(self._current_picked_polygons())} 个 | 预览分区 {self._preview_patch_count()} 个 | 靠近起点自动闭合"
+                f"圈选区域 {len(self._current_picked_polygons())} 个 | 预览分区 {self._preview_patch_count()} 个 | 关闭绘制后左键旋转 | 靠近起点自动闭合"
             )
             return
         barriers = len(self._current_barriers())
         draw_state = "拉线模式开启" if self.draw_button.isChecked() else "拉线模式关闭"
         self.hint.setText(
             f"{draw_state} | 当前 region {region_index} ({page}) | "
-            f"分割线 {barriers} 条 | 预览分区 {self._preview_patch_count()} 个"
+            f"分割线 {barriers} 条 | 预览分区 {self._preview_patch_count()} 个 | 关闭拉线后左键旋转"
         )
 
     def _apply(self) -> None:
@@ -600,9 +629,9 @@ class ManualPartitionDialog(QDialog):
 
             records: list[dict] = []
             for region_index in self.selected_regions:
-                _triangles, faces = self._region_geometry(region_index)
+                _source_triangles, _triangles, faces, chart = self._region_geometry(region_index)
                 if self._is_pick_mode():
-                    records.extend(
+                    new_records = (
                         manual_pick_manifest_records(
                             self.project.selected_path_face_regions,
                             {region_index},
@@ -611,7 +640,7 @@ class ManualPartitionDialog(QDialog):
                         )
                     )
                 else:
-                    records.extend(
+                    new_records = (
                         manual_clip_manifest_records(
                             self.project.selected_path_face_regions,
                             {region_index},
@@ -620,6 +649,13 @@ class ManualPartitionDialog(QDialog):
                             mode=self.partition_mode,
                         )
                     )
+                for record in new_records:
+                    record["clip_space"] = "raster_uv"
+                    record["raster_chart"] = chart
+                    for patch in record.get("patches", []):
+                        patch["clip_space"] = "raster_uv"
+                        patch["raster_chart"] = chart
+                records.extend(new_records)
 
             manifest = {
                 "schema": "base_casting_abb6700.manual_region_partition_manifest",
