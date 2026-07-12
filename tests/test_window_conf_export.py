@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import importlib.util
+import json
 
 
 def _load_script_module():
@@ -61,3 +62,41 @@ def test_safe_region_label_keeps_manual_partition_name() -> None:
 
     assert module.safe_region_label("1_1") == "1_1"
     assert module.safe_region_label("13 2") == "13_2"
+
+
+def test_version_1_manifest_uses_materialized_project_regions(tmp_path) -> None:
+    module = _load_script_module()
+    project_path = tmp_path / "partitioned.rsp.json"
+    project_path.write_text("{}", encoding="utf-8")
+    manifest_path = module.partition_manifest_path_for(project_path)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": "base_casting_abb6700.manual_region_partition_manifest",
+                "version": 1,
+                "records": [{"original_region": 1, "patches": [{"label": "1.1"}, {"label": "1.2"}]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    regions = module.manual_clip_regions(project_path, [{1, 2}, {8, 9}])
+
+    assert [item["face_ids"] for item in regions] == [{1, 2}, {8, 9}]
+    assert [item["label"] for item in regions] == ["1", "2"]
+
+
+def test_hole_gap_starts_a_new_motion_segment() -> None:
+    module = _load_script_module()
+    normal = (0.0, 0.0, 1.0)
+    samples = [
+        (module.encoded_raster_line_id(0, 3), 0, 1, (0.0, 0.0, 0.0), normal),
+        (module.encoded_raster_line_id(0, 3), 1, 1, (10.0, 0.0, 0.0), normal),
+        (module.encoded_raster_line_id(0, 3), 2, 1, (100.0, 0.0, 0.0), normal),
+    ]
+
+    split = module.split_discontinuous_raster_segments(samples, point_step=10.0)
+
+    assert module.raster_segment_id(split[0][0]) == 0
+    assert module.raster_segment_id(split[1][0]) == 0
+    assert module.raster_segment_id(split[2][0]) == 1

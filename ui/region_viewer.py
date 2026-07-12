@@ -7,7 +7,8 @@ from pathlib import Path
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-from vtkmodules.vtkCommonCore import vtkUnsignedCharArray
+from vtkmodules.vtkCommonCore import vtkPoints, vtkUnsignedCharArray
+from vtkmodules.vtkCommonDataModel import vtkCellArray, vtkPolyData
 from vtkmodules.vtkInteractionStyle import vtkInteractorStyleTrackballCamera
 from vtkmodules.vtkRenderingCore import vtkActor, vtkPolyDataMapper, vtkRenderer, vtkTextActor
 import vtkmodules.vtkRenderingOpenGL2  # noqa: F401
@@ -89,6 +90,7 @@ class RegionPreview(QWidget):
         super().__init__()
         self.setMinimumHeight(360)
         self._actor: vtkActor | None = None
+        self._path_actor: vtkActor | None = None
         self._reader = None
 
         self.renderer = vtkRenderer()
@@ -115,6 +117,7 @@ class RegionPreview(QWidget):
         self.vtk_widget.GetRenderWindow().Render()
 
     def load_project(self, project_path: Path) -> None:
+        self.clear_paths()
         if not project_path.exists():
             self.set_message(f"输入不存在: {project_path}")
             return
@@ -158,6 +161,53 @@ class RegionPreview(QWidget):
         self.renderer.AddActor(actor)
         self.renderer.ResetCamera()
         self.vtk_widget.GetRenderWindow().Render()
+
+    def clear_paths(self) -> None:
+        if self._path_actor is not None:
+            self.renderer.RemoveActor(self._path_actor)
+            self._path_actor = None
+            self.vtk_widget.GetRenderWindow().Render()
+
+    def show_paths(self, paths: list[object]) -> None:
+        """Overlay model-coordinate raster runs without joining holes or lines."""
+        self.clear_paths()
+        points = vtkPoints()
+        lines = vtkCellArray()
+        run_count = 0
+        point_count = 0
+        for path in paths:
+            current: list[object] = []
+            current_key = None
+            for waypoint in path.waypoints:
+                key = (waypoint.region_id, waypoint.line_id)
+                if current_key is not None and key != current_key:
+                    if len(current) >= 2:
+                        lines.InsertNextCell(len(current))
+                        for item in current:
+                            lines.InsertCellPoint(points.InsertNextPoint(*item.position_model))
+                        run_count += 1
+                    current = []
+                current.append(waypoint)
+                current_key = key
+                point_count += 1
+            if len(current) >= 2:
+                lines.InsertNextCell(len(current))
+                for item in current:
+                    lines.InsertCellPoint(points.InsertNextPoint(*item.position_model))
+                run_count += 1
+        polydata = vtkPolyData()
+        polydata.SetPoints(points)
+        polydata.SetLines(lines)
+        mapper = vtkPolyDataMapper()
+        mapper.SetInputData(polydata)
+        actor = vtkActor()
+        actor.SetMapper(mapper)
+        actor.GetProperty().SetColor(0.18, 0.66, 1.0)
+        actor.GetProperty().SetLineWidth(3.0)
+        self._path_actor = actor
+        self.renderer.AddActor(actor)
+        self.vtk_widget.GetRenderWindow().Render()
+        self.set_message(f"path preview: {point_count} points / {run_count} continuous runs")
 
     def _manual_clip_patches(self, project_path: Path, regions: list[set[int]]) -> list[dict]:
         manifest_path = manual_manifest_path_for(project_path)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import sys
 from dataclasses import dataclass
@@ -114,21 +115,22 @@ def default_output_dir(
     angles: list[int],
     window_mode: str,
     experiment_mode: str,
+    date_suffix: str | None = None,
 ) -> Path:
     mode_suffixes = {
         "rail": "rail",
         "turntable": "turn",
     }
     mode_suffix = mode_suffixes.get(experiment_mode, experiment_mode)
+    date_suffix = date_suffix or datetime.now().strftime("%m%d")
     return (
         runner.base.EXPERIMENT_DIR
         / "results"
         / (
-            "optY_"
             f"{coord_label('x', x_spec)}_"
             f"{coord_label('y', y_spec)}_"
             f"{coord_label('z', z_spec)}_"
-            f"long_{mode_suffix}"
+            f"{mode_suffix}_{date_suffix}"
         )
     )
 

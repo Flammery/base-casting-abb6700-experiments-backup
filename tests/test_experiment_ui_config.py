@@ -175,9 +175,11 @@ def test_configurable_runner_default_output_dir_mentions_scan() -> None:
     x_spec = module.parse_coordinate_spec("3700", 3700.0)
     y_spec = module.parse_coordinate_spec("-1900,100,1900", 0.0)
     z_spec = module.parse_coordinate_spec("440", 440.0)
-    outdir = module.default_output_dir(x_spec, y_spec, z_spec, [0, 180], "custom", "rail")
+    outdir = module.default_output_dir(x_spec, y_spec, z_spec, [0, 180], "custom", "rail", date_suffix="0713")
 
-    assert outdir.name.startswith("optY_")
+    assert outdir.name == "x3700_yM1900_1900_step100_z440_rail_0713"
+    assert "optY" not in outdir.name
+    assert "long" not in outdir.name
     assert "x3700" in outdir.name
     assert "yM1900_1900_step100" in outdir.name
     assert "rz000_180" not in outdir.name
@@ -190,7 +192,7 @@ def test_configurable_runner_default_output_path_stays_short_enough() -> None:
     x_spec = module.parse_coordinate_spec("3700", 3700.0)
     y_spec = module.parse_coordinate_spec("-1900,100,1900", 0.0)
     z_spec = module.parse_coordinate_spec("440", 440.0)
-    outdir = module.default_output_dir(x_spec, y_spec, z_spec, [0, 180], "custom", "rail")
+    outdir = module.default_output_dir(x_spec, y_spec, z_spec, [0, 180], "custom", "rail", date_suffix="0713")
     sample = (
         outdir
         / "candidates"

@@ -21,8 +21,10 @@ from robot_studio_qt.core.geometry import cross, dot, normalize
 from robot_studio_qt.kinematics.orientation import Quaternion, euler_xyz_degrees_to_quaternion, matrix_to_quaternion
 from robot_studio_qt.path_planning.mesh_raster import (
     average_normal,
+    encoded_raster_line_id,
     mesh_centroid,
     project_triangle,
+    raster_base_line_id,
     raster_segment_id,
     read_triangles,
     sample_projected_mesh,
@@ -136,7 +138,14 @@ def manual_clip_regions(project_path: Path, regions: list[set[int]]) -> list[dic
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception:
         manifest = {}
-    if manifest.get("schema") != "base_casting_abb6700.manual_region_partition_manifest":
+    # Version 1 materialized partitions directly into selected_path_face_regions.
+    # It shares the historical schema name with the version-2 UV clip manifest,
+    # so treating v1 records as clip polygons duplicates region 1 and corrupts
+    # paths. Only v2 records contain authoritative clip/exclusion geometry.
+    if (
+        manifest.get("schema") != "base_casting_abb6700.manual_region_partition_manifest"
+        or int(manifest.get("version", 0)) != 2
+    ):
         return [
             {
                 "source_region": index,
@@ -154,22 +163,66 @@ def manual_clip_regions(project_path: Path, regions: list[set[int]]) -> list[dic
         source_region = int(record.get("original_region", 0))
         if source_region <= 0 or source_region > len(regions):
             continue
-        patched_sources.add(source_region)
+        appended = False
         for patch in record.get("patches", []):
+            clip_polygon = patch.get("clip_polygon")
+            if not isinstance(clip_polygon, list) or len(clip_polygon) < 3:
+                continue
             clip_regions.append(
                 {
                     "source_region": source_region,
                     "label": str(patch.get("label", f"{source_region}_1")),
                     "face_ids": set(regions[source_region - 1]),
-                    "clip_polygon": patch.get("clip_polygon"),
+                    "clip_polygon": clip_polygon,
                     "exclude_polygons": patch.get("exclude_polygons") or [],
                 }
             )
+            appended = True
+        if appended:
+            patched_sources.add(source_region)
     for index, region in enumerate(regions, 1):
         if index in patched_sources:
             continue
         clip_regions.append({"source_region": index, "label": str(index), "face_ids": region, "clip_polygon": None, "exclude_polygons": []})
     return clip_regions
+
+
+def split_discontinuous_raster_segments(samples, point_step: float):
+    """Give scanline intervals separated by a hole independent motion segments.
+
+    The mesh sampler intentionally returns multiple intervals for a scanline
+    crossing a hole. Historically those intervals shared one line/segment id,
+    causing preview and RAPID MoveL motion to bridge the empty area. A same-line
+    jump larger than the normal point step starts a new processing segment;
+    build_motion() will then add safe departure/approach waypoints.
+    """
+    if not samples:
+        return samples
+    output = []
+    segment_id = 0
+    previous = None
+    previous_source_segment = None
+    jump_limit = max(float(point_step) * 1.5, 1e-6)
+    for line_id, point_id, face_id, point_model, normal_model in samples:
+        source_segment = raster_segment_id(line_id)
+        if previous_source_segment is not None and source_segment != previous_source_segment:
+            segment_id += 1
+        if previous is not None and raster_base_line_id(line_id) == raster_base_line_id(previous[0]):
+            distance = math.dist(point_model, previous[3])
+            if distance > jump_limit:
+                segment_id += 1
+        output.append(
+            (
+                encoded_raster_line_id(segment_id, raster_base_line_id(line_id)),
+                point_id,
+                face_id,
+                point_model,
+                normal_model,
+            )
+        )
+        previous = (line_id, point_id, face_id, point_model, normal_model)
+        previous_source_segment = source_segment
+    return output
 
 
 def placement_for(base, picked_origin, model_x: float, model_y: float, model_z: float, model_rz: float):
@@ -561,6 +614,7 @@ def plan_region_uv(
     samples = sample_projected_mesh(projected, settings)
     if clip_polygon or exclude_polygons:
         samples = [sample for sample in samples if point_allowed_by_clip((sample[3][0], sample[3][1]), clip_polygon, exclude_polygons)]
+    samples = split_discontinuous_raster_segments(samples, settings.point_step)
     if not samples:
         return PathResult(PathSource.MESH, placement.name, settings, message="No raster samples were generated.")
 

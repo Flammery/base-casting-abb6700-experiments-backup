@@ -21,8 +21,11 @@ from PySide6.QtWidgets import (
 )
 
 UI_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = UI_DIR.parent / "scripts"
 if str(UI_DIR) not in sys.path:
     sys.path.insert(0, str(UI_DIR))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
 from experiment_config import (  # noqa: E402
     DEFAULT_INPUT,
@@ -45,6 +48,7 @@ from manual_partition_dialog import (  # noqa: E402
     manual_manifest_path_for,
 )
 from region_viewer import RegionPreview  # noqa: E402
+import window_conf_export as path_preview_backend  # noqa: E402
 
 
 class ExperimentPanel(QWidget):
@@ -76,6 +80,7 @@ class ExperimentPanel(QWidget):
         self.boundary_margin.setPlaceholderText("6")
         self.boundary_margin.setFixedWidth(58)
         self.start_button = QPushButton("开始")
+        self.preview_path_button = QPushButton("快速预览路径")
 
         self.angle_preset = QComboBox()
         self.angle_preset.addItems(["地轨 0,180", "地轨 90,270", "转台 0..360 step10"])
@@ -101,6 +106,7 @@ class ExperimentPanel(QWidget):
         first_row.addWidget(self.partition_regions)
         first_row.addWidget(self.partition_output)
         first_row.addWidget(self.apply_partition_button)
+        first_row.addWidget(self.preview_path_button)
         first_row.addWidget(self.start_button)
 
         second_row = QHBoxLayout()
@@ -125,6 +131,7 @@ class ExperimentPanel(QWidget):
 
         self.input_button.clicked.connect(self.choose_input)
         self.apply_partition_button.clicked.connect(self.apply_partition)
+        self.preview_path_button.clicked.connect(self.preview_paths)
         self.start_button.clicked.connect(self.start_run)
         self.input_path.editingFinished.connect(self.refresh_region_count)
         self.angle_preset.currentTextChanged.connect(self._sync_mode_defaults)
@@ -176,6 +183,75 @@ class ExperimentPanel(QWidget):
             self.model_y.setText("0")
         elif mode in ("地轨 0,180", "地轨 90,270") and self.model_y.text().strip() in ("", "0"):
             self.model_y.setText(DEFAULT_Y)
+
+    @staticmethod
+    def _first_coordinate(text: str, fallback: str) -> float:
+        return float((text.strip() or fallback).split(",", 1)[0].strip())
+
+    def _preview_angle(self) -> int:
+        return 90 if "90,270" in self.angle_preset.currentText() else 0
+
+    def preview_paths(self) -> None:
+        """Use the production planner once and draw its model-coordinate result."""
+        if self._process is not None:
+            QMessageBox.information(self, "正在运行", "当前实验尚未结束。")
+            return
+        try:
+            project_path = Path(self.input_path.text())
+            project = path_preview_backend.load_project_file(project_path)
+            regions = [set(region) for region in project.selected_path_face_regions]
+            if not regions:
+                raise ValueError("当前项目没有已选择的加工面。")
+            planning_regions = path_preview_backend.manual_clip_regions(project_path, regions)
+            importer = path_preview_backend.CadImportService().import_model(project.workpiece.file_path)
+            reader = path_preview_backend.create_mesh_reader(importer.display_path, importer.display_format)
+            reader.SetFileName(str(importer.display_path))
+            reader.Update()
+            polydata = reader.GetOutput()
+            placement = path_preview_backend.placement_for(
+                project.workpiece,
+                project.workpiece.picked_origin,
+                self._first_coordinate(self.model_x.text(), DEFAULT_X),
+                self._first_coordinate(self.model_y.text(), DEFAULT_Y),
+                self._first_coordinate(self.model_z.text(), DEFAULT_Z),
+                float(self._preview_angle()),
+            )
+            settings = path_preview_backend.RasterPlannerSettings(
+                spacing=path_preview_backend.SPACING,
+                point_step=path_preview_backend.POINT_STEP,
+                angle_degrees=0.0,
+                boundary_margin=float(self.boundary_margin.text().strip() or DEFAULT_BOUNDARY_MARGIN),
+                bidirectional=True,
+                feed_direction=path_preview_backend.RasterFeedDirection.LONG_SIDE,
+                start_corner=path_preview_backend.StartCorner.LOWER_LEFT,
+                tool_axis="-z",
+                speed=100.0,
+                zone="z1",
+                tool_name=project.polishing_tool.name,
+            )
+            paths = []
+            for planning_region in planning_regions:
+                result = path_preview_backend.plan_region_uv(
+                    polydata,
+                    placement,
+                    settings,
+                    planning_region["face_ids"],
+                    path_preview_backend.RasterFeedDirection.LONG_SIDE,
+                    planning_region.get("clip_polygon"),
+                    planning_region.get("exclude_polygons"),
+                )
+                if result.waypoints:
+                    paths.append(result)
+            if not paths:
+                raise RuntimeError("当前设置没有生成可预览路径。")
+            self.preview.show_paths(paths)
+            total = sum(len(path.waypoints) for path in paths)
+            self.status.setText(
+                f"快速预览完成: angle={self._preview_angle()}° | regions={len(paths)} | points={total}"
+            )
+        except Exception as exc:
+            self.status.setText(f"快速预览失败: {exc}")
+            QMessageBox.warning(self, "快速预览失败", str(exc))
 
     def apply_partition(self) -> None:
         if self._process is not None:
@@ -265,6 +341,7 @@ class ExperimentPanel(QWidget):
     def _start_process(self, label: str, command: list[str], kind: str) -> None:
         self.start_button.setEnabled(False)
         self.apply_partition_button.setEnabled(False)
+        self.preview_path_button.setEnabled(False)
         self._runner_output = ""
         self._process_kind = kind
         self.status.setText(f"{label} 运行中...")
@@ -292,6 +369,7 @@ class ExperimentPanel(QWidget):
         self._process = None
         self.start_button.setEnabled(True)
         self.apply_partition_button.setEnabled(True)
+        self.preview_path_button.setEnabled(True)
         if exit_code != 0:
             tail = "\n".join(self._runner_output.splitlines()[-8:])
             self.status.setText(f"运行失败，exit={exit_code}: {tail}")
