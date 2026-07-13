@@ -32,6 +32,20 @@ C:\Users\21093\Desktop\p1\.venv\Scripts\python.exe -m pytest tests -q
 9. 运行一次正式导出并记录 waypoint/segment/patch 数。
 10. 导入 RobotStudio，对比快速预览与实际路径。
 
+## 坐标与 RAPID 验收
+
+至少验证 RZ = 0/90/180/270 四个姿态：
+
+1. tool 名称、wobj 名称与输入项目一致；
+2. 根据 `picked_origin` 手算 wobj XYZ，与输出快照及 RAPID `wobjdata` 一致；
+3. model -> world -> wobj -> world 往返误差在数值容差内；
+4. base 加工窗口判断使用 world/base 坐标；
+5. robtarget 位置使用 `position_wobj`；
+6. world quaternion 转 wobj quaternion 后，RobotStudio 中工具方向与快速预览一致；
+7. 修改实验 X/Y/Z/RZ 后模型与路径同步移动，没有整体偏移或重复旋转；
+8. tool TCP/flange 几何未被实验参数改写；
+9. 若使用占位 load，summary/验收记录明确标记“未标定”。
+
 ## 建议保存的基准证据
 
 - 分区窗口截图；

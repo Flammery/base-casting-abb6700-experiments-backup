@@ -51,6 +51,29 @@
 - 默认目录末尾应有运行日期 `%m%d`。
 - 显式传入 `--output-dir` 时由用户保证目录隔离。
 
+## 软件预览正确但 RobotStudio 路径整体偏移
+
+- 检查是否只修改了 `model_x/y/z/rz` 而没有同步 `wobj_x/y/z/rz`。
+- 检查 `picked_origin` 是否按当前 RZ 旋转，或是否被旋转了两次。
+- 检查 robtarget 是否使用 `position_wobj`，而不是 `position_world`。
+- 对照 `COORDINATE_SYSTEMS.md` 中的 placement 公式。
+
+## RobotStudio 中工件或路径重复旋转
+
+- 检查 `model_rz`、`wobj_rz` 和 world-to-wobj quaternion 是否分别只应用一次。
+- 禁止在路径点位置中预旋转后又通过 wobj 重复旋转。
+
+## 工具方向错误但路径位置正确
+
+- 检查 waypoint quaternion 和 world-to-wobj 姿态转换。
+- 不要修改 tool TCP 或 flange-to-TCP 几何来补偿方向。
+- 检查使用的 tool 名称是否仍来自输入项目。
+
+## RAPID 工具载荷看似有效但未标定
+
+- 若输入 `mass_kg <= 0`，实验可能写入 1 kg/占位 load。
+- 占位值只解决 RobotStudio 格式接受问题，投入真实运行前必须替换为实测工具载荷。
+
 ## Git 显示 detached HEAD
 
 - commit 仍会成功创建，但不会自动属于某个本地分支。

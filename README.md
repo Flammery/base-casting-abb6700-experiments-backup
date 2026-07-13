@@ -5,7 +5,8 @@ polishing study. For agent handoff rules, read `AGENTS.md`. For algorithm
 principles, read `PRINCIPLES.md`.
 
 设计决策见 `DECISION_LOG.md`，manifest 字段见 `MANIFEST_SCHEMA.md`，已知故障见
-`TROUBLESHOOTING.md`，提交前验收见 `VALIDATION.md`。
+`TROUBLESHOOTING.md`，坐标同步见 `COORDINATE_SYSTEMS.md`，提交前验收见
+`VALIDATION.md`。
 
 ## 中文说明
 

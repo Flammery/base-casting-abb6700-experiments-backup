@@ -123,6 +123,20 @@ Current default intent:
 The phase-1 RAPID export strategy is "limited machining window + fixed
 configuration", not global IK for every waypoint.
 
+### Placement and coordinate inheritance
+
+Tool and workobject names, tool TCP/flange geometry, picked origin, and the base
+placement come from the software-exported project. Experiment X/Y/Z/RZ are
+placement overrides, not replacement coordinate definitions. Updating a scan
+pose must update model placement and wobj together using the rotated picked
+origin defined in `COORDINATE_SYSTEMS.md`.
+
+`position_model` is used for surface/ray geometry, `position_world` for base
+window and confdata decisions, and `position_wobj` for ABB robtargets. Do not
+write world positions directly as wobj targets, rotate picked origin twice, or
+modify tool TCP to compensate an unwanted path quaternion. A fallback load used
+when mass is missing is compatibility data, not tool calibration.
+
 Current base machining window:
 
 ```text

@@ -66,6 +66,16 @@
 - 决定：`scripts/raster_domain.py`、手动分区、窗口策略、批跑和 ABB 导出属于实验层；MeshTriangle、mesh reader、PathResult、Waypoint 和通用变换继续复用 `src`。
 - 约束：不要复制整个 `src/path_planning` 到实验目录。
 
+## D010 工具与工件坐标继承和同步
+
+- 日期：2026-07-13
+- 状态：Accepted
+- 决定：tool/wobj 名称、TCP、picked origin 和基础 placement 来自软件导出的项目；实验只覆盖扫描要求的 model X/Y/Z/RZ，并使用同一 RZ 和旋转后的 picked origin 同步更新 wobj。
+- 原因：模型预览、base 加工窗口和 ABB robtarget 必须描述同一个物理安装位姿。
+- 约束：不能只移动模型不移动 wobj；不能直接把 world position 写入 robtarget；不能修改 tool TCP 补偿 quaternion。
+- 例外：缺失工具载荷时允许写 RobotStudio 兼容占位值，但必须视为未标定数据。
+- 详细公式：见 `COORDINATE_SYSTEMS.md`。
+
 ## 新决策模板
 
 ```text

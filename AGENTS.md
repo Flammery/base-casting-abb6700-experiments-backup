@@ -5,7 +5,8 @@ active architecture, script responsibilities, and hard boundaries. For algorithm
 details, read `PRINCIPLES.md`. For how to run the workflow, read `README.md`.
 Before changing partition architecture, read `DECISION_LOG.md`; for persisted
 fields read `MANIFEST_SCHEMA.md`; for known failures and acceptance checks read
-`TROUBLESHOOTING.md` and `VALIDATION.md`.
+`TROUBLESHOOTING.md` and `VALIDATION.md`. Read `COORDINATE_SYSTEMS.md` before
+changing placement, workobject, tooldata, transforms, or RAPID coordinates.
 
 ## Active Architecture
 
@@ -105,6 +106,12 @@ patch.
 - For manual manifest v2, the raster polygon owns the machining boundary. STL
   cells only provide ray hits and normals. Preview colors use a raster texture,
   never cell-centroid classification or clipped replacement geometry.
+- Inherit tool and workobject names, TCP geometry, picked origin, and base
+  placement data from the exported project. Experiment X/Y/Z/RZ must update
+  model placement and wobj together through `placement_for()`. Use world/base
+  coordinates for machining-window checks and wobj coordinates for robtargets.
+- Never change tool TCP to compensate orientation, never rotate picked origin
+  twice, and never treat the fallback tool load as calibrated data.
 
 ## 中文说明
 
