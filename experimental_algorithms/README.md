@@ -2,6 +2,14 @@
 
 Reserved for later prototypes that should not affect the application source tree yet.
 
+## Active prototype: hole-aware raster
+
+`hole_aware_raster.py` is intentionally kept here while default `auto` mode
+selects it only for relevant-hole patches and UI `Start-1` forces it for
+comparison. It groups scanline runs into cells, visits one hole side at a time,
+and routes on-surface connectors. Ordinary auto patches retain the normal raster
+fast path. Its limitations are documented in `../HOLE_AWARE_PLANNER.md`.
+
 Candidate topics:
 
 - collision and clearance filtering;
@@ -16,6 +24,10 @@ Keep phase-1 production experiments in `../scripts/` until an algorithm is stabl
 ## 中文说明
 
 这里预留给后续激进算法原型，避免还没验证稳定的内容影响软件主体。
+
+当前 `hole_aware_raster.py` 是活动原型。默认“开始”的 `auto` 只对相关带孔 patch
+调用它，无孔 patch 保留普通 raster 快路径；“开始-1”强制所有 patch 使用它。
+适用输入、失败策略和安全限制见 `../HOLE_AWARE_PLANNER.md`。
 
 候选方向包括：
 

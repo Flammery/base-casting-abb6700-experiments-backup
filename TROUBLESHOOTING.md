@@ -31,6 +31,50 @@
 - 检查射线未命中后是否开启了新 segment。
 - 不要仅删除孔内点后继续连接孔洞两侧 waypoint。
 
+## 点击“开始-1”后全部进入 deferred
+
+- 检查输入是否为 manual manifest v2。
+- 检查目标 patch 是否同时具有 `raster_chart` 和 `clip_polygon`。
+- 检查孔洞是否写入 `exclude_polygons`。
+- 查看 `deferred_paths.csv` 的 `reason`：找不到 free-domain connector 或 connector
+  ray lift 失败时，新策略会拒绝导出，不会穿孔回退。
+- legacy face-id region 没有 raster chart 时，应先在当前 UI 中重新执行区域划分并应用。
+
+## “开始”把无孔面也分到 hole-aware
+
+- `auto` 判断的是孔 polygon 是否与当前 patch 相交，不是仅检查
+  `exclude_polygons` 是否非空；先确认 clip/hole polygon 坐标都属于同一 raster chart。
+- 普通 raster 后如果同一 scanline 出现多个 segment，auto 也会主动升级，防止未记录
+  孔洞造成直线跨越；查看实际 mesh/ray miss 是否形成了缺口。
+- `summary.json` 的两个 auto path count 按候选路径计数，不等于唯一面数。
+
+## “开始”或“开始-1”完成但快速预览仍显示旧抬刀路径
+
+- 这是当前已知限制，不是 planner 参数失效。
+- “快速预览路径”仍调用 legacy `plan_region_uv()`；“开始”通过子进程调用 auto，
+  “开始-1”调用强制 `--planner hole-aware`。
+- 请检查 `_hole_aware` 目录中的点 CSV 和 RAPID，或导入 RobotStudio 验证。
+
+## 新路径不穿孔但离孔边太近
+
+- 当前 connector 合法性检查以 TCP 点位于二维有效域为准，没有砂轮/刀盘扫掠体补偿。
+- `boundary_margin` 不是完整工具包络或碰撞模型。
+- 在 RobotStudio 按真实工具尺寸检查；需要更大余量时应增大分区/边缘余量，不能把
+  二维不穿孔当成实际无碰撞。
+
+## 新路径在窄通道找不到绕行路线
+
+- hole-aware connector 使用有限分辨率栅格 A*，大区域会限制节点数并增大网格步长。
+- 小于当前网格分辨率的通道可能被判定不可行。
+- 当前正确行为是 deferred；禁止为了出结果而恢复穿孔直线。
+- 若真实通道必须使用，应先单独改进 connector 分辨率/导航域并增加相应回归测试。
+
+## “开始”和“开始-1”结果互相覆盖
+
+- 默认情况下新策略目录会追加 `_hole_aware`。
+- 如果显式传入相同的 `--output-dir`，目录隔离由调用者负责。
+- 检查 `summary.json` 的 `planner` 字段，避免把 legacy 和 hole-aware 结果混用。
+
 ## 多边形点击没有反应
 
 - 旋转视图后检查吸附半径计算，必须使用变换矩阵列向量长度，不能只用 `m11/m22`。

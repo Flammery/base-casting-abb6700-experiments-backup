@@ -116,6 +116,7 @@ def default_output_dir(
     window_mode: str,
     experiment_mode: str,
     date_suffix: str | None = None,
+    planner: str = "legacy",
 ) -> Path:
     mode_suffixes = {
         "rail": "rail",
@@ -123,6 +124,7 @@ def default_output_dir(
     }
     mode_suffix = mode_suffixes.get(experiment_mode, experiment_mode)
     date_suffix = date_suffix or datetime.now().strftime("%m%d")
+    planner_suffix = "_hole_aware" if planner == "hole-aware" else ""
     return (
         runner.base.EXPERIMENT_DIR
         / "results"
@@ -130,7 +132,7 @@ def default_output_dir(
             f"{coord_label('x', x_spec)}_"
             f"{coord_label('y', y_spec)}_"
             f"{coord_label('z', z_spec)}_"
-            f"{mode_suffix}_{date_suffix}"
+            f"{mode_suffix}_{date_suffix}{planner_suffix}"
         )
     )
 
@@ -142,6 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-y")
     parser.add_argument("--model-z", default="440")
     parser.add_argument("--boundary-margin", type=float, default=runner.base.BOUNDARY_MARGIN)
+    parser.add_argument("--planner", choices=["legacy", "auto", "hole-aware"], default="auto")
     parser.add_argument("--y-start", type=int, default=-1900, help="Compatibility fallback when --model-y is omitted.")
     parser.add_argument("--y-stop", type=int, default=1900, help="Compatibility fallback when --model-y is omitted.")
     parser.add_argument("--y-step", type=int, default=100, help="Compatibility fallback when --model-y is omitted.")
@@ -320,6 +323,8 @@ def run_optimal_scan(
     candidate_rows: list[dict] = []
     deferred_rows: list[dict] = []
     coverage_rows: list[dict] = []
+    auto_hole_aware_count = 0
+    auto_raster_count = 0
 
     for model_x, model_y, model_z in iter_poses(x_spec, y_spec, z_spec):
         pose_dir = candidates_dir / pose_label(model_x, model_y, model_z)
@@ -365,7 +370,13 @@ def run_optimal_scan(
 
                 inside_regions.append(region_index)
                 for variant_name, feed_variant in runner.FEED_VARIANTS:
-                    path = runner.base.plan_region_uv(
+                    relevant_holes = runner.base.polygon_has_relevant_holes(
+                        planning_region.get("clip_polygon"),
+                        planning_region.get("exclude_polygons") or [],
+                    )
+                    use_hole_aware = args.planner == "hole-aware" or (args.planner == "auto" and relevant_holes)
+                    planner = runner.base.plan_region_uv_hole_aware if use_hole_aware else runner.base.plan_region_uv
+                    path = planner(
                         polydata,
                         placement,
                         settings,
@@ -375,8 +386,35 @@ def run_optimal_scan(
                         planning_region.get("exclude_polygons"),
                         planning_region.get("raster_chart"),
                     )
+                    if args.planner == "auto" and not use_hole_aware and runner.base.path_has_split_scanlines(path):
+                        use_hole_aware = True
+                        path = runner.base.plan_region_uv_hole_aware(
+                            polydata,
+                            placement,
+                            settings,
+                            planning_region["face_ids"],
+                            feed_variant,
+                            planning_region.get("clip_polygon"),
+                            planning_region.get("exclude_polygons"),
+                            planning_region.get("raster_chart"),
+                        )
+                    if args.planner == "auto":
+                        if use_hole_aware:
+                            auto_hole_aware_count += 1
+                        else:
+                            auto_raster_count += 1
                     if path.waypoints:
-                        row = runner.base.export_path_variant(project, placement, path, angle, region_index, variant_name, planning_region["label"])
+                        row = runner.base.export_path_variant(
+                            project,
+                            placement,
+                            path,
+                            angle,
+                            region_index,
+                            variant_name,
+                            planning_region["label"],
+                            hole_aware=args.planner != "legacy",
+                            planner_label=("auto-hole-aware" if use_hole_aware else "auto-raster") if args.planner == "auto" else args.planner,
+                        )
                         row["source_region"] = planning_region["source_region"]
                         candidate_rows.append(enrich_candidate_row(model_x, model_y, model_z, angle, row, path))
                     else:
@@ -414,6 +452,9 @@ def run_optimal_scan(
         "candidate_dir": str(candidates_dir),
         "optimal_dir": str(optimal_dir),
         "configurable_runner": True,
+        "planner": args.planner,
+        "auto_hole_aware_path_count": auto_hole_aware_count,
+        "auto_raster_path_count": auto_raster_count,
         "experiment_mode": args.experiment_mode,
         "scan_axis": scan_axis,
         "model_x_values": x_spec.values,
@@ -470,6 +511,7 @@ def run_from_args(args: argparse.Namespace) -> Path:
         angles,
         args.window_mode,
         args.experiment_mode,
+        planner=args.planner,
     )
     run_optimal_scan(args, x_spec, y_spec, z_spec, angles, bounds, outdir)
     return outdir

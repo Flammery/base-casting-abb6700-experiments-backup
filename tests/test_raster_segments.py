@@ -88,3 +88,39 @@ def test_build_motion_adds_safe_approach_for_each_raster_segment() -> None:
 
     assert [waypoint.index for waypoint in motion].count(-1) == 2
     assert len(motion) == 8
+
+
+def test_hole_aware_motion_has_only_global_base_safe_points() -> None:
+    module = _load_window_export_module()
+    path = SimpleNamespace(
+        waypoints=[
+            _waypoint(0, encoded_raster_line_id(0, 0), (1000.0, 50.0, 200.0)),
+            _waypoint(1, encoded_raster_line_id(1, 1), (1100.0, 60.0, 220.0)),
+        ]
+    )
+
+    motion = module.build_hole_aware_motion(WorkpiecePlacement(), path)
+
+    assert len(motion) == 4
+    assert motion[0].position_world == (900.0, 50.0, 300.0)
+    assert motion[-1].position_world == (1000.0, 60.0, 320.0)
+    assert [waypoint.index for waypoint in motion].count(-1) == 1
+
+
+def test_split_scanline_detection_distinguishes_holes_from_normal_lines() -> None:
+    module = _load_window_export_module()
+    normal = SimpleNamespace(
+        waypoints=[
+            _waypoint(0, encoded_raster_line_id(0, 0), (0.0, 0.0, 0.0)),
+            _waypoint(1, encoded_raster_line_id(1, 1), (0.0, 10.0, 0.0)),
+        ]
+    )
+    split = SimpleNamespace(
+        waypoints=[
+            _waypoint(0, encoded_raster_line_id(0, 0), (0.0, 0.0, 0.0)),
+            _waypoint(1, encoded_raster_line_id(1, 0), (20.0, 0.0, 0.0)),
+        ]
+    )
+
+    assert module.path_has_split_scanlines(normal) is False
+    assert module.path_has_split_scanlines(split) is True

@@ -80,6 +80,7 @@ class ExperimentPanel(QWidget):
         self.boundary_margin.setPlaceholderText("6")
         self.boundary_margin.setFixedWidth(58)
         self.start_button = QPushButton("开始")
+        self.start_hole_aware_button = QPushButton("开始-1")
         self.preview_path_button = QPushButton("快速预览路径")
 
         self.angle_preset = QComboBox()
@@ -122,6 +123,7 @@ class ExperimentPanel(QWidget):
         second_row.addWidget(self.window_limits)
         second_row.addWidget(QLabel("边缘余量"))
         second_row.addWidget(self.boundary_margin)
+        second_row.addWidget(self.start_hole_aware_button)
         second_row.addStretch(1)
 
         layout.addLayout(first_row)
@@ -133,6 +135,7 @@ class ExperimentPanel(QWidget):
         self.apply_partition_button.clicked.connect(self.apply_partition)
         self.preview_path_button.clicked.connect(self.preview_paths)
         self.start_button.clicked.connect(self.start_run)
+        self.start_hole_aware_button.clicked.connect(self.start_hole_aware_run)
         self.input_path.editingFinished.connect(self.refresh_region_count)
         self.angle_preset.currentTextChanged.connect(self._sync_mode_defaults)
         self.refresh_region_count()
@@ -315,6 +318,12 @@ class ExperimentPanel(QWidget):
         return None
 
     def start_run(self) -> None:
+        self._start_run_with_planner("auto", "自动连续策略")
+
+    def start_hole_aware_run(self) -> None:
+        self._start_run_with_planner("hole-aware", "绕孔连续策略")
+
+    def _start_run_with_planner(self, planner: str, label: str) -> None:
         if self._process is not None:
             QMessageBox.information(self, "正在运行", "当前任务还没有结束。")
             return
@@ -331,16 +340,18 @@ class ExperimentPanel(QWidget):
                 self.angle_preset.currentText(),
                 self.window_limits.text(),
                 self.boundary_margin.text(),
+                planner,
             )
         except Exception as exc:
             self.status.setText(f"实验参数错误: {exc}")
             QMessageBox.warning(self, "实验参数错误", str(exc))
             return
 
-        self._start_process("Optimal-Y 实验", command, "run")
+        self._start_process(label, command, "run")
 
     def _start_process(self, label: str, command: list[str], kind: str) -> None:
         self.start_button.setEnabled(False)
+        self.start_hole_aware_button.setEnabled(False)
         self.apply_partition_button.setEnabled(False)
         self.preview_path_button.setEnabled(False)
         self._runner_output = ""
@@ -369,6 +380,7 @@ class ExperimentPanel(QWidget):
     def _process_finished(self, exit_code: int, _status) -> None:
         self._process = None
         self.start_button.setEnabled(True)
+        self.start_hole_aware_button.setEnabled(True)
         self.apply_partition_button.setEnabled(True)
         self.preview_path_button.setEnabled(True)
         if exit_code != 0:
@@ -396,6 +408,7 @@ class ExperimentPanel(QWidget):
                 "完成: "
                 f"output={summary.get('output_dir', summary_path.parent)} | "
                 f"scan={summary.get('scan_axis', '-')} | "
+                f"planner={summary.get('planner', 'legacy')} | "
                 f"poses={summary.get('pose_count', '-')} | "
                 f"regions={summary.get('selected_region_count', '-')} | "
                 f"candidates={summary.get('candidate_count', '-')} | "

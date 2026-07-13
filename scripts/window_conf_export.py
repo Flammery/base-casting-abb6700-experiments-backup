@@ -12,10 +12,13 @@ EXPERIMENT_DIR = Path(__file__).resolve().parents[1]
 ROOT = EXPERIMENT_DIR.parents[1]
 SRC = ROOT / "src"
 SCRIPT_DIR = Path(__file__).resolve().parent
+EXPERIMENTAL_DIR = EXPERIMENT_DIR / "experimental_algorithms"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
+if str(EXPERIMENTAL_DIR) not in sys.path:
+    sys.path.insert(0, str(EXPERIMENTAL_DIR))
 
 from robot_studio_qt.cad.import_service import CadImportService
 from robot_studio_qt.cad.mesh_io import create_mesh_reader
@@ -44,6 +47,7 @@ from robot_studio_qt.path_planning.transforms import WorkpieceTransform
 from robot_studio_qt.polishing_tool import tool_to_rapid
 from robot_studio_qt.project import load_project_file, save_project_file
 from raster_domain import point_to_uv, raster_samples
+from hole_aware_raster import hole_aware_raster_samples, polygon_has_relevant_holes  # noqa: F401 - runner API
 
 
 PARTITIONED_PROJECT_PATH = EXPERIMENT_DIR / "inputs" / "latest_partitioned.rsp.json"
@@ -79,6 +83,8 @@ SPACING = 50.0
 POINT_STEP = 50.0
 BOUNDARY_MARGIN = 6.0
 SAFE_DISTANCE = 150.0
+SAFE_BASE_X_OFFSET = -100.0
+SAFE_BASE_Z_OFFSET = 100.0
 CONF_Y_NEGATIVE = (-1, -1, 0, 1)
 CONF_Y_NONNEGATIVE = (0, 0, -1, 1)
 TOOL_LOAD_MASS_KG = 1.0
@@ -232,6 +238,14 @@ def split_discontinuous_raster_segments(samples, point_step: float):
     return output
 
 
+def path_has_split_scanlines(path) -> bool:
+    """Detect multiple disconnected runs on one raster line after normal sampling."""
+    segments_by_line: dict[int, set[int]] = {}
+    for waypoint in path.waypoints:
+        segments_by_line.setdefault(raster_base_line_id(waypoint.line_id), set()).add(raster_segment_id(waypoint.line_id))
+    return any(len(segments) > 1 for segments in segments_by_line.values())
+
+
 def placement_for(base, picked_origin, model_x: float, model_y: float, model_z: float, model_rz: float):
     # 同步更新模型安装位姿和 wobj：路径点用工件坐标导出，但窗口判断使用基座/世界坐标。
     placement = base.clone()
@@ -325,6 +339,28 @@ def build_motion(placement, path):
         motion.append(approach_waypoint(placement, segment_waypoints[-1], SAFE_DISTANCE, len(path.waypoints)))
         start = end
     return motion
+
+
+def base_safe_waypoint(placement, waypoint, index: int):
+    """Offset an endpoint in base/world coordinates, then convert it to wobj."""
+    position = (
+        waypoint.position_world[0] + SAFE_BASE_X_OFFSET,
+        waypoint.position_world[1],
+        waypoint.position_world[2] + SAFE_BASE_Z_OFFSET,
+    )
+    transform = WorkpieceTransform(placement)
+    return replace(waypoint, index=index, position_world=position, position_wobj=transform.world_point_to_wobj(position))
+
+
+def build_hole_aware_motion(placement, path):
+    """Add one global base-coordinate safe point at each end of a continuous path."""
+    if not path.waypoints:
+        return []
+    return [
+        base_safe_waypoint(placement, path.waypoints[0], -1),
+        *path.waypoints,
+        base_safe_waypoint(placement, path.waypoints[-1], len(path.waypoints)),
+    ]
 
 
 def base_y_aligned_quaternion(normal_world: tuple[float, float, float], previous: Quaternion | None) -> Quaternion:
@@ -673,9 +709,92 @@ def plan_region_uv(
     return PathResult(PathSource.MESH, placement.name or "wobj0", settings, waypoints, f"Generated {len(waypoints)} UV {feed_variant.value} raster waypoints.")
 
 
-def export_path_variant(project, placement, path, angle: int, region_index: int, variant: str, region_label: str | None = None) -> dict:
+def plan_region_uv_hole_aware(
+    polydata,
+    placement,
+    base_settings: RasterPlannerSettings,
+    region: set[int],
+    feed_variant: RasterFeedDirection,
+    clip_polygon: list[list[float]] | None = None,
+    exclude_polygons: list[list[list[float]]] | None = None,
+    raster_chart: dict | None = None,
+) -> PathResult:
+    """Plan one continuous, hole-aware raster path in the manual UV domain."""
+    settings = replace(base_settings, feed_direction=feed_variant)
+    if not raster_chart or not clip_polygon:
+        return PathResult(
+            PathSource.MESH,
+            placement.name,
+            settings,
+            message="Hole-aware planning requires a raster_chart and clip_polygon.",
+        )
+    triangles = read_triangles(polydata, region)
+    if not triangles:
+        return PathResult(PathSource.MESH, placement.name, settings, message="Mesh has no selected triangular surface cells.")
+    domain_samples, diagnostics = hole_aware_raster_samples(
+        clip_polygon,
+        exclude_polygons or [],
+        triangles,
+        raster_chart,
+        settings.spacing,
+        settings.point_step,
+        settings.boundary_margin,
+        settings.bidirectional,
+        feed_variant == RasterFeedDirection.LONG_SIDE,
+    )
+    if not domain_samples:
+        return PathResult(
+            PathSource.MESH,
+            placement.name,
+            settings,
+            message=f"Hole-aware planning failed: {diagnostics.get('reason', 'no valid samples')}",
+        )
+    transform = WorkpieceTransform(placement)
+    previous = None
+    waypoints: list[Waypoint] = []
+    for index, (segment_id, line_id, point_id, face_id, point_model, normal_model) in enumerate(domain_samples):
+        point_world = transform.model_point_to_world(point_model)
+        normal_world = transform.model_vector_to_world(normal_model)
+        quaternion = base_y_aligned_quaternion(normal_world, previous)
+        previous = quaternion
+        waypoints.append(
+            Waypoint(
+                index=index,
+                source=PathSource.MESH,
+                region_id=0,
+                face_id=face_id,
+                line_id=encoded_raster_line_id(segment_id, line_id),
+                point_id=point_id,
+                position_model=point_model,
+                position_world=point_world,
+                position_wobj=transform.world_point_to_wobj(point_world),
+                normal_world=normal_world,
+                normal_wobj=transform.world_vector_to_wobj(normal_world),
+                quaternion=quaternion,
+            )
+        )
+    return PathResult(
+        PathSource.MESH,
+        placement.name or "wobj0",
+        settings,
+        waypoints,
+        f"Generated {len(waypoints)} hole-aware waypoints in {diagnostics['cell_count']} cells with {diagnostics['connector_count']} connectors.",
+    )
+
+
+def export_path_variant(
+    project,
+    placement,
+    path,
+    angle: int,
+    region_index: int,
+    variant: str,
+    region_label: str | None = None,
+    hole_aware: bool = False,
+    planner_label: str | None = None,
+) -> dict:
     # 每个 region、每个角度、每个进给变体独立保存，便于 RobotStudio 单独验证。
-    motion = build_motion(placement, path)
+    motion = build_hole_aware_motion(placement, path) if hole_aware else build_motion(placement, path)
     label = safe_region_label(region_label or f"{region_index}")
     folder = OUTDIR / f"rz{angle:03d}" / label / variant
     folder.mkdir(parents=True, exist_ok=True)
@@ -697,6 +816,7 @@ def export_path_variant(project, placement, path, angle: int, region_index: int,
         "points_csv": "",
         "orientation_mode": ORIENTATION_MODE,
         "axis_mode": AXIS_MODE,
+        "planner": planner_label or ("hole-aware" if hole_aware else "legacy"),
     }
     normalize_tool_load(row)
     return row

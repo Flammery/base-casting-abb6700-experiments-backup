@@ -73,6 +73,12 @@ patch.
   selected STL cells, and returns XYZ plus facet normals. Do not replace this
   with STL cell coloring or mesh clipping.
 
+- `experimental_algorithms/hole_aware_raster.py`
+  Planner used selectively by default `auto` mode and forced by UI `Start-1` /
+  runner `--planner hole-aware`. It groups raster runs into cells and creates
+  on-surface free-domain connectors. Ordinary auto patches must stay on the
+  normal raster fast path.
+
 - `scripts/optimal_y_selection.py`
   Lightweight selector for dual-robot rail experiments. It chooses one candidate
   per region by `max(abs(world_y))` over processing waypoints only. Do not add
@@ -103,6 +109,9 @@ patch.
 - Do not make full per-waypoint IK the main batch loop.
 - Risky or exploratory algorithms should start in `experimental_algorithms/`
   unless they are already part of this experiment's reusable script layer.
+- Hole-aware currently requires manual-v2 `raster_chart` and `clip_polygon`.
+  Connector failure must defer the path; never bridge a hole or silently fall
+  back to legacy motion. Its 2D validity is not collision or IK validation.
 - For manual manifest v2, the raster polygon owns the machining boundary. STL
   cells only provide ray hits and normals. Preview colors use a raster texture,
   never cell-centroid classification or clipped replacement geometry.

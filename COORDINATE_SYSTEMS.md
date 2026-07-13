@@ -57,6 +57,22 @@ model -> world/base -> wobj
 
 窗口判断不能使用 `position_wobj`，RAPID robtarget 不能直接写 `position_world`。
 
+## Hole-aware 首尾安全位置
+
+实验性 hole-aware planner 每个 patch 只创建两个安全位置。偏移必须先在
+world/base 坐标中计算：
+
+```text
+start_safe_world = first_processing_world + (-100, 0, +100) mm
+end_safe_world   = last_processing_world  + (-100, 0, +100) mm
+```
+
+随后使用当前同步后的 `WorkpieceTransform` 把安全位置转换为 `position_wobj`。禁止直接
+在 wobj 或 model 坐标中套用 `x-100/z+100`。安全点姿态继承对应加工端点姿态。
+
+该偏移只是当前实验约定，不代表已完成碰撞、可达性或安全空间认证；每个安装位姿仍需
+在 RobotStudio 中验证。
+
 ## 姿态与 RAPID
 
 路径姿态先在 world/base 下按表面法向生成。写 RAPID 时：

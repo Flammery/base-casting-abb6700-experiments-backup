@@ -44,7 +44,8 @@
 - 日期：2026-07-13
 - 状态：Accepted
 - 决定：从外轮廓 scanline intervals 中减去 `exclude_polygons`，射线未命中也必须断开 processing segment。
-- 约束：孔洞两侧不能共享连续加工运动。
+- 约束：孔洞两侧不能用一条直线 processing motion 直接相连；hole-aware 只能通过
+  已验证位于有效域且能逐点 ray lift 的 connector 绕行。
 
 ## D007 manifest v1/v2 必须按版本解释
 
@@ -75,6 +76,21 @@
 - 约束：不能只移动模型不移动 wobj；不能直接把 world position 写入 robtarget；不能修改 tool TCP 补偿 quaternion。
 - 例外：缺失工具载荷时允许写 RobotStudio 兼容占位值，但必须视为未标定数据。
 - 详细公式：见 `COORDINATE_SYSTEMS.md`。
+
+## D011 Auto/Hole-aware UI 策略
+
+- 日期：2026-07-13
+- 状态：Accepted for experiment
+- 背景：legacy 按 raster segment 插入进退刀，导致扫描线边缘反复抬起；带孔扫描线
+  按行处理还会在孔洞两侧频繁切换。
+- 决定：“开始”和 configurable runner 默认运行 `auto`：先快速判断与当前 patch 相关的
+  hole polygon，无孔时使用普通 raster，有孔或普通采样后同一 scanline 出现多个 run 时
+  使用 `experimental_algorithms/hole_aware_raster.py`。第二行“开始-1”强制 hole-aware。
+  auto 的两类路径都只保留首尾安全位置。
+- 约束与影响：目标必须有 `raster_chart + clip_polygon`；connector 失败必须 deferred；
+  快速预览仍为 legacy；新输出目录追加 `_hole_aware`；不得把二维避孔视为碰撞/IK认证。
+- 后续：真实 RobotStudio 验证完成后，另行决定是否删除“开始-1”和 legacy CLI 回退。
+- 详细限制：见 `HOLE_AWARE_PLANNER.md`。
 
 ## 新决策模板
 

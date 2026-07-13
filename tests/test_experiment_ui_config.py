@@ -96,6 +96,36 @@ def test_runner_command_uses_equals_for_negative_coordinate_range(tmp_path) -> N
     assert "--boundary-margin=6" in command
 
 
+def test_runner_command_adds_hole_aware_planner_only_when_requested(tmp_path) -> None:
+    module = _load_ui_config_module()
+    common = (
+        "python",
+        tmp_path / "input.rsp.json",
+        "3500",
+        "0",
+        "440",
+        "地轨 0,180",
+        "1500,2500;-1050,1050",
+        "6",
+    )
+
+    legacy = module.runner_command(*common)
+    hole_aware = module.runner_command(*common, planner="hole-aware")
+
+    assert "--planner" not in legacy
+    assert "--planner" in hole_aware
+    assert hole_aware[hole_aware.index("--planner") + 1] == "hole-aware"
+
+    automatic = module.runner_command(*common, planner="auto")
+    assert automatic[automatic.index("--planner") + 1] == "auto"
+
+
+def test_configurable_runner_defaults_to_auto_planner() -> None:
+    module = _load_runner_module()
+
+    assert module.build_parser().parse_args([]).planner == "auto"
+
+
 def test_parse_boundary_margin_text_defaults_and_rejects_negative() -> None:
     module = _load_ui_config_module()
 

@@ -164,6 +164,7 @@ def runner_command(
     angle_preset: str,
     window_text: str,
     boundary_margin_text: str = DEFAULT_BOUNDARY_MARGIN,
+    planner: str = "legacy",
 ) -> list[str]:
     scan_axis_for_coordinates(model_x, model_y, model_z)
     boundary_margin = parse_boundary_margin_text(boundary_margin_text)
@@ -178,6 +179,10 @@ def runner_command(
         f"--boundary-margin={boundary_margin:g}",
         *angle_args(angle_preset),
     ]
+    if planner not in {"legacy", "auto", "hole-aware"}:
+        raise ValueError(f"未知路径策略: {planner}")
+    if planner != "legacy":
+        command.extend(["--planner", planner])
     limits = parse_custom_window_text(window_text)
     if all(limit is None for limit in limits.values()):
         command.extend(["--window-mode", "unlimited"])

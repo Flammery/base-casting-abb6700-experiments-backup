@@ -158,6 +158,30 @@ Region path rules:
 - Do not use global XYZ scan axes or current path tangent as a substitute for
   region UV.
 
+### Experimental hole-aware motion
+
+The default UI `Start` and configurable runner use `auto`: patches with relevant
+hole polygons (or multiple runs on one sampled scanline) use hole-aware order,
+while ordinary patches use the normal raster sampler. UI `Start-1` forces the
+hole-aware planner for comparison and troubleshooting:
+
+- subtract holes before ordering motion;
+- decompose scanline runs into boustrophedon cells;
+- finish one cell/hole side before visiting another;
+- connect cells only through the valid 2D domain and ray-lift every connector;
+- add only one global start safe point and one global end safe point per patch.
+
+The two safe points are offset in world/base coordinates by `(-100, 0, +100)`
+mm from the corresponding processing endpoint, then transformed to wobj.
+Processing and connector motion uses MoveL; only the initial safe target uses
+MoveJ.
+
+This planner does not establish collision freedom, robot reachability, IK
+continuity, tool-envelope clearance, or global shortest motion. It requires a
+manual-v2 `raster_chart` and `clip_polygon`; an invalid connector must defer the
+path instead of crossing a hole or silently falling back to legacy motion. See
+`HOLE_AWARE_PLANNER.md` for the complete contract.
+
 TCP orientation:
 
 ```text
