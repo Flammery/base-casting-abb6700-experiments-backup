@@ -4,6 +4,10 @@ This is the project-specific offline workspace for the large base-casting
 polishing study. For agent handoff rules, read `AGENTS.md`. For algorithm
 principles, read `PRINCIPLES.md`.
 
+Optimal-Y 完成后，可在实验 UI 点击“导入 RobotStudio 验证”，选择该次实验结果目录，
+按 region/patch 生成 RobotStudio 6.08 人工验证工作站。安装、目录选择、命名规则、操作流程和
+安全边界见 `ROBOTSTUDIO_EXPORT.md`；生成工作站不等于碰撞、可达性或姿态验证通过。
+
 设计决策见 `DECISION_LOG.md`，manifest 字段见 `MANIFEST_SCHEMA.md`，已知故障见
 `TROUBLESHOOTING.md`，坐标同步见 `COORDINATE_SYSTEMS.md`，提交前验收见
 `VALIDATION.md`。带孔连续路径的行为和限制见 `HOLE_AWARE_PLANNER.md`。

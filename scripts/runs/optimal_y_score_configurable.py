@@ -442,6 +442,19 @@ def run_optimal_scan(
     optimal_table = write_csv_safely(outdir / "optimal_selection.csv", best_table_rows)
     deferred_table = write_csv_safely(outdir / "deferred_paths.csv", deferred_rows)
     coverage_table = write_csv_safely(outdir / "coverage_by_pose.csv", coverage_rows)
+    optimal_records_path = outdir / "optimal_records.json"
+    optimal_records_path.write_text(
+        json.dumps(
+            {
+                "schema": "base_casting_abb6700.optimal_records",
+                "version": 1,
+                "records": best_records,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     scan_axis = determine_scan_axis(x_spec, y_spec, z_spec)
     summary = {
@@ -491,6 +504,7 @@ def run_optimal_scan(
         "coverage_table": str(coverage_table),
         "candidate_table": str(candidate_table),
         "optimal_table": str(optimal_table),
+        "optimal_records": str(optimal_records_path),
         "deferred_table": str(deferred_table),
         "candidate_count": len(candidate_rows),
         "optimal_region_count": len(best_records),

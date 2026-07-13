@@ -118,6 +118,30 @@
 - 若输入 `mass_kg <= 0`，实验可能写入 1 kg/占位 load。
 - 占位值只解决 RobotStudio 格式接受问题，投入真实运行前必须替换为实测工具载荷。
 
+## RobotStudio 导出提示没有最优记录
+
+- 必须选择一次实验结果目录，即同时包含 `summary.json`、`optimal_selection.csv` 和
+  `optimal_paths` 的那一级；不要选择 `results` 总目录或某个单独面目录。
+- 检查 `optimal_records.json` 的 `records` 是否非空，或 `optimal_selection.csv` 是否包含
+  `BEST` 行。若 `candidate_count=0`，应先解决路径规划/deferred 问题，RobotStudio 打包器
+  不会替代 Optimal-Y 计算。
+- 每个最优标签必须存在对应的 `optimal_paths/<region_label>/<region_label>.txt`。
+
+## RobotStudio 打开工作站后没有自动加载 RAPID
+
+- 确认目标版本为 RobotStudio 6.08.01，并在插件安装或更新后完整重启 RobotStudio。
+- 确认 `.rsstn` 旁边存在同名 `.robotstudio_job.json`，且其中引用的 `CalibData.mod` 和路径
+  `.mod` 都存在。
+- 查看 `%LOCALAPPDATA%\ABB6700RobotStudioBridge\addin.log` 和 `last_error.txt`。
+- 确认模板虚拟控制器已启动、任务名与配置中的 `controller_task` 一致，默认是 `T_ROB1`。
+- 不要同时打开多个生成工作站；这些文件按顺序复用模板虚拟控制器。
+
+## RobotStudio 提示找不到场景工件组件
+
+- `workpiece_component_name` 必须是模板工作站树中场景模型的精确名称，不是 RAPID wobj 名称。
+- 工件模型安装位置与 RAPID 工件坐标相互独立；禁止通过把组件改名为 `wobj1` 来绕过错误。
+- 若更换了模板工作站，同步更新 `configs/robotstudio_export.json` 后重新生成工作站。
+
 ## Git 显示 detached HEAD
 
 - commit 仍会成功创建，但不会自动属于某个本地分支。

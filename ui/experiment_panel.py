@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, Qt
+from PySide6.QtCore import QProcess, QTimer, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -49,6 +49,7 @@ from manual_partition_dialog import (  # noqa: E402
 )
 from region_viewer import RegionPreview  # noqa: E402
 import window_conf_export as path_preview_backend  # noqa: E402
+from robotstudio_package import build_package, queue_manifest  # noqa: E402
 
 
 class ExperimentPanel(QWidget):
@@ -60,6 +61,8 @@ class ExperimentPanel(QWidget):
         self._runner_output = ""
         self._process_kind = ""
         self._current_region_count = 0
+        self._last_result_dir: Path | None = None
+        self._robotstudio_result_dir: Path | None = None
 
         self.input_path = QLineEdit(str(DEFAULT_INPUT))
         self.input_path.setMinimumWidth(360)
@@ -82,6 +85,9 @@ class ExperimentPanel(QWidget):
         self.start_button = QPushButton("开始")
         self.start_hole_aware_button = QPushButton("开始-1")
         self.preview_path_button = QPushButton("快速预览路径")
+        self.robotstudio_button = QPushButton("导入 RobotStudio 验证")
+        self.robotstudio_timer = QTimer(self)
+        self.robotstudio_timer.setInterval(1000)
 
         self.angle_preset = QComboBox()
         self.angle_preset.addItems(["地轨 0,180", "地轨 90,270", "转台 0..360 step10"])
@@ -128,6 +134,12 @@ class ExperimentPanel(QWidget):
 
         layout.addLayout(first_row)
         layout.addLayout(second_row)
+        third_row = QHBoxLayout()
+        third_row.setContentsMargins(0, 0, 0, 0)
+        third_row.addWidget(self.robotstudio_button)
+        third_row.addWidget(QLabel("每个最优面生成工作站；场景安装位置与 RAPID 工件坐标相互独立，按面顺序验证"))
+        third_row.addStretch(1)
+        layout.addLayout(third_row)
         layout.addWidget(self.preview, 1)
         layout.addWidget(self.status)
 
@@ -136,6 +148,8 @@ class ExperimentPanel(QWidget):
         self.preview_path_button.clicked.connect(self.preview_paths)
         self.start_button.clicked.connect(self.start_run)
         self.start_hole_aware_button.clicked.connect(self.start_hole_aware_run)
+        self.robotstudio_button.clicked.connect(self.export_to_robotstudio)
+        self.robotstudio_timer.timeout.connect(self._poll_robotstudio_status)
         self.input_path.editingFinished.connect(self.refresh_region_count)
         self.angle_preset.currentTextChanged.connect(self._sync_mode_defaults)
         self.refresh_region_count()
@@ -354,6 +368,7 @@ class ExperimentPanel(QWidget):
         self.start_hole_aware_button.setEnabled(False)
         self.apply_partition_button.setEnabled(False)
         self.preview_path_button.setEnabled(False)
+        self.robotstudio_button.setEnabled(False)
         self._runner_output = ""
         self._process_kind = kind
         self.status.setText(f"{label} 运行中...")
@@ -383,6 +398,7 @@ class ExperimentPanel(QWidget):
         self.start_hole_aware_button.setEnabled(True)
         self.apply_partition_button.setEnabled(True)
         self.preview_path_button.setEnabled(True)
+        self.robotstudio_button.setEnabled(True)
         if exit_code != 0:
             tail = "\n".join(self._runner_output.splitlines()[-8:])
             self.status.setText(f"运行失败，exit={exit_code}: {tail}")
@@ -404,6 +420,7 @@ class ExperimentPanel(QWidget):
         summary_path = self._summary_path_from_output()
         if summary_path and summary_path.exists():
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            self._last_result_dir = Path(summary.get("output_dir", summary_path.parent))
             self.status.setText(
                 "完成: "
                 f"output={summary.get('output_dir', summary_path.parent)} | "
@@ -418,6 +435,56 @@ class ExperimentPanel(QWidget):
             return
         self.status.setText("完成: 未找到 summary.json，请查看脚本输出。")
         QMessageBox.information(self, "完成", self.status.text())
+
+    def export_to_robotstudio(self) -> None:
+        if self._process is not None:
+            QMessageBox.information(self, "正在运行", "请等待当前实验完成后再生成 RobotStudio 工作站。")
+            return
+        default_dir = self._last_result_dir or (Path(__file__).resolve().parents[1] / "results")
+        selected = QFileDialog.getExistingDirectory(self, "选择 Optimal-Y 实验结果文件夹", str(default_dir))
+        if not selected:
+            return
+        result_dir = Path(selected)
+        try:
+            manifest_path = build_package(result_dir)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            queue_manifest(manifest_path, launch=True)
+        except Exception as exc:
+            self.status.setText(f"RobotStudio 导出准备失败: {exc}")
+            QMessageBox.critical(self, "RobotStudio 导出准备失败", str(exc))
+            return
+
+        self._robotstudio_result_dir = result_dir
+        self.robotstudio_button.setEnabled(False)
+        self.robotstudio_timer.start()
+        self.status.setText(
+            f"已提交 RobotStudio: jobs={len(manifest.get('jobs', []))} | {manifest_path}"
+        )
+
+    def _poll_robotstudio_status(self) -> None:
+        if self._robotstudio_result_dir is None:
+            self.robotstudio_timer.stop()
+            return
+        status_path = self._robotstudio_result_dir / "robotstudio_status.json"
+        if not status_path.exists():
+            return
+        try:
+            payload = json.loads(status_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        state = payload.get("state", "unknown")
+        self.status.setText(
+            f"RobotStudio: {state} | {payload.get('completed', 0)}/{payload.get('total', 0)} | "
+            f"region={payload.get('current_region', '-')} | {payload.get('message', '')}"
+        )
+        if state not in {"completed", "failed"}:
+            return
+        self.robotstudio_timer.stop()
+        self.robotstudio_button.setEnabled(True)
+        if state == "completed":
+            QMessageBox.information(self, "RobotStudio 工作站已生成", self.status.text())
+        else:
+            QMessageBox.critical(self, "RobotStudio 工作站生成失败", self.status.text())
 
     def _summary_path_from_output(self) -> Path | None:
         for line in reversed(self._runner_output.splitlines()):

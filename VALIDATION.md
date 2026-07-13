@@ -85,3 +85,18 @@ auto 运行时第 1 项改为确认 `planner=auto`，并核对
 - 使用的 commit hash 和输入文件名。
 
 视觉结果未完成上述检查时，不能仅凭 pytest 通过认定 UI/几何修改完成。
+
+## RobotStudio 工作站导出验收
+
+1. 场景工件组件名称由 RobotStudio 配置指定，不得使用 wobj 名称代替。
+2. 场景工件只应用最优记录的 `model_x/model_y/model_z/model_rz`；RAPID wobj 保持路径
+   导出的名称和数值。
+3. `tooldata`、`wobjdata` 只存在于该工作站的 `CalibData`，路径模块仍引用原名称。
+4. 同时测试未分区标签 `2` 与分区标签 `1_1`。
+5. 文件名显式包含 `rz0` 或其它实际角度，并位于
+   `optimal_paths/<region_label>/`。
+6. 顺序打开两个不同区域的 `.rsstn`，确认场景安装位置随文件改变，控制器路径模块由
+   `VALIDATE_<前一区域>` 自动切换为 `VALIDATE_<当前区域>`，且 `CalibData` 保留导出名称和数据。
+7. 模板工作站的哈希和最后修改时间不得改变。
+8. 插件不得把“成功保存工作站”报告为碰撞、可达性或姿态验证通过。
+9. 切换完成后控制器中不得残留 `RSBRIDGE`，程序指针必须位于当前路径模块的 `main`。

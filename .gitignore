@@ -11,3 +11,7 @@ results/*
 # Local temporary files
 tmp/
 *.log
+
+# RobotStudio add-in build outputs
+robotstudio_addin/bin/
+robotstudio_addin/obj/

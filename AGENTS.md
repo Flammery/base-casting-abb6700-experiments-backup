@@ -84,6 +84,18 @@ patch.
   per region by `max(abs(world_y))` over processing waypoints only. Do not add
   per-waypoint IK optimization here.
 
+- `scripts/robotstudio_package.py`
+  Packages selected Optimal-Y RAPID into one job per region/patch. It separates
+  exported tooldata/wobjdata into CalibData, preserves their original names and
+  values, and writes a RobotStudio job manifest. It does not perform robot
+  validation.
+
+- `robotstudio_addin/`
+  RobotStudio 6.08 add-in that recognizes a generated station after RobotStudio
+  opens it normally, waits for its virtual controller, and loads the matching
+  CalibData/path sidecars. Generated stations reuse the calibrated template
+  controller sequentially; validate one station at a time.
+
 - `scripts/runs/`
   Concrete parameter-run entry points. They import the reusable scripts above
   and set model X/Y/Z, angle lists, output directories, and feed variants for
@@ -121,6 +133,13 @@ patch.
   coordinates for machining-window checks and wobj coordinates for robtargets.
 - Never change tool TCP to compensate orientation, never rotate picked origin
   twice, and never treat the fallback tool load as calibrated data.
+- RobotStudio scene component identity/model placement and RAPID wobj
+  identity/data are separate concerns. Never derive one name from the other.
+- RobotStudio export must preserve both plain region labels (`2`) and partition
+  labels (`1_2`), explicitly include RZ in station filenames, write stations
+  under `optimal_paths/<region_label>/`, and never overwrite the template.
+- Keep each generated `.rsstn` with its `.mod` files and matching
+  `.robotstudio_job.json`; opening a station is what triggers its RAPID switch.
 
 ## 中文说明
 

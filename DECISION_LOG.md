@@ -92,6 +92,29 @@
 - 后续：真实 RobotStudio 验证完成后，另行决定是否删除“开始-1”和 legacy CLI 回退。
 - 详细限制：见 `HOLE_AWARE_PLANNER.md`。
 
+## D012 RobotStudio 独立验证工作站导出
+
+- 日期：2026-07-13
+- 状态：Accepted for experiment
+- 背景：Optimal-Y 完成后，人工逐面复制 RAPID、修改场景工件安装位置并另存工作站非常繁琐。
+- 决定：实验 UI 增加“导入 RobotStudio 验证”，读取用户选择的实验结果目录，为每个最优
+  region/patch 生成一个独立 RobotStudio 工作站。每个工作站只包含该面的最优路径。
+- 坐标职责：场景工件组件名称和 `model_x/model_y/model_z/model_rz` 只控制模型安装位置；
+  RAPID 的 tool/wobj 名称及数据来自该次路径导出，二者不得混用或相互改名。
+- RAPID 规则：从最优路径模块提取 `tooldata` 和 `wobjdata` 到该工作站自己的
+  `CalibData`，路径模块继续引用原始 tool/wobj 名称。
+- 区域规则：同时支持未分区标签 `2`、`3`、`4` 和分区标签 `1_1`、`1_2`；文件名显示时
+  分区下划线转为短横线。
+- 命名规则：显式包含 `rz0`、`rz180` 等姿态，例如
+  `3600_m800_440_rz0_1-1.rsstn`。
+- 输出规则：生成的 `.rsstn` 放在该实验结果的 `optimal_paths/<region_label>/` 中，不覆盖
+  模板工作站。
+- 控制器规则：生成文件顺序复用模板中已实验标定的虚拟控制器；每个 `.rsstn` 同目录保存
+  RAPID sidecar，工作站由 RobotStudio 正常打开后，插件自动切换为当前面的 `CalibData` 和路径模块。
+  一次只验证一个生成工作站，不宣称多个工作站可并发使用同一控制器。
+- 验证边界：插件只准备场景和程序，不评价姿态、碰撞、可达性或路径质量。
+- 详细合同：见 `ROBOTSTUDIO_EXPORT.md`。
+
 ## 新决策模板
 
 ```text
