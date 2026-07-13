@@ -4,6 +4,9 @@ This is the project-specific offline workspace for the large base-casting
 polishing study. For agent handoff rules, read `AGENTS.md`. For algorithm
 principles, read `PRINCIPLES.md`.
 
+设计决策见 `DECISION_LOG.md`，manifest 字段见 `MANIFEST_SCHEMA.md`，已知故障见
+`TROUBLESHOOTING.md`，提交前验收见 `VALIDATION.md`。
+
 ## 中文说明
 
 这是底座大型结构件 ABB 6700 抛光实验目录。这里的脚本用于离线读取软件导出的
@@ -76,6 +79,18 @@ manifest v2 会记录 `partition_mode`、`barriers_by_region`、
 `.rsp.json` 仍只保存原有的 `selected_path_face_regions`；圈选边界只由导出器读取
 manifest 后作为 raster-domain clip 使用，不改变项目 schema。
 
+交互规则：
+
+- 关闭绘制工具后，左键拖动旋转二维加工域；
+- 滚轮缩放；
+- “旋转90°”用于快速调整观察方向，“翻面”用于修正操作视图镜像；
+- 矩形始终在屏幕坐标中横平竖直，松开后再转换为 raster UV；
+- 多边形可靠近起点闭合，也可右键结束。
+
+点击“快速预览路径”会调用正式导出的同一 `plan_region_uv()`，只在内存中生成并
+显示路径，不创建整批 Optimal-Y 输出。手动 v2 的颜色区域由二维 RGBA mask 作为
+texture 显示；STL 不会被切割或重建。
+
 ## 常用命令
 
 查看分区结果但不写文件：
@@ -143,6 +158,10 @@ python experiments\base_casting_abb6700\scripts\runs\optimal_y_score_x3500_z440.
   核心 RAPID 导出脚本。负责读取 selected regions、扫描工件位姿和转台角度、窗口筛选、
   生成 boundary-UV raster 路径、写 RAPID/TXT/CSV/summary。
 
+- `scripts/raster_domain.py`
+  手动 manifest v2 的二维路径核心：计算 patch 扫描轴、生成 polygon scanline、扣除
+  孔洞 interval，并沿 chart normal 射线投射到选中 STL，返回 XYZ 和三角面法向。
+
 - `scripts/optimal_y_selection.py`
   双机器人导轨 Y 位置选择模块。按 processing waypoint 的
   `max(abs(world_y))` 为每个 region 选择候选路径。
@@ -151,6 +170,13 @@ python experiments\base_casting_abb6700\scripts\runs\optimal_y_score_x3500_z440.
   具体实验入口。它们导入上面的可复用模块，设置 X/Y/Z、角度、输出目录和 feed variant。
 
 ## 分区结果怎么看
+
+自动分区和手动分区是两种不同数据：
+
+- 自动预处理会把 face-id regions 写入 `.rsp.json`，manifest 记录
+  `planar/curved`、面积和 face ids；
+- 手动 v2 不改写源 face region，manifest 记录 `raster_chart`、二维 patch polygon、
+  holes 和 `1_1/1_2` 等标签，exporter 会理解这些标签并逐 patch 规划。
 
 分区不会修改项目 schema。`.rsp.json` 里仍然只有 `selected_path_face_regions`。
 子区标签写在 manifest 中，例如：
@@ -170,7 +196,7 @@ python experiments\base_casting_abb6700\scripts\runs\optimal_y_score_x3500_z440.
 - 面积；
 - face id 列表。
 
-后续 `window_conf_export.py` 不理解 `1.1` 这种标签，它只看到多个独立 region 并逐个导出。
+上述 `1.1 planar` 说明只适用于自动 face-id 分区。手动 v2 标签会进入输出目录和汇总表。
 
 ## 当前策略摘要
 
@@ -220,3 +246,8 @@ and UV.
 - 没有窄通道的连续区域不会被全局线误切；
 - 曲面/近似平面阶段能分出不同 patch；
 - 未指定 region 保持原样。
+- manifest v1/v2 不混读；
+- 手动 patch 独立扫描轴；
+- raster-domain 射线 XYZ 与 facet normal；
+- 孔洞扣除和不连续 segment；
+- 输出目录日期及路径长度。

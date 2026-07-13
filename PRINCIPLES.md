@@ -24,7 +24,7 @@ The application layer owns:
 
 - project file schema;
 - selected-face persistence;
-- mesh reading and raster sampling primitives;
+- mesh reading and legacy mesh-raster sampling primitives;
 - shared geometry and transform math;
 - generic RAPID formatting utilities.
 
@@ -36,6 +36,7 @@ The experiment layer owns:
 - batch summaries;
 - RAPID grouping;
 - phase-specific assumptions.
+- manual raster-domain scanlines, hole subtraction, and ray projection.
 
 ## Manual UV Partitioning
 
@@ -55,6 +56,12 @@ the polygon and outside any generated hole polygons. Multiple picked polygons
 produce independent patches labelled from the source region, such as `1_1` and
 `1_2`.
 
+For manual v2, the polygon—not the STL triangulation—owns the machining
+boundary. Scanlines are created directly in 2D, holes are subtracted as
+intervals, and accepted samples are ray-projected to selected STL cells. The hit
+triangle supplies XYZ and facet normal only. Each patch derives its own scan
+axes from its own polygon.
+
 The v2 manual manifest is the source of truth for these clips. It records the
 mode and per-region input geometry, while each patch records `clip_space`,
 `raster_chart`, `clip_polygon`, `exclude_polygons`, and source face ids. An
@@ -65,6 +72,11 @@ bottleneck partitioning: use automatic partitioning for geometry-derived
 boundaries, and manual UV clipping when the operator has a known machining
 area. Do not introduce global XYZ split lines or mutate `src/` to support this
 experiment.
+
+Manual partition visualization uses a PySide-painted RGBA raster mask as a VTK
+texture on the unchanged STL. Cell-centroid colors and replacement/clipped mesh
+geometry are prohibited because they reintroduce triangle-shaped boundaries or
+unstable topology.
 
 ## Partition Preprocessing Algorithm
 

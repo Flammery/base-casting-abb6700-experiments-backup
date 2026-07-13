@@ -1,7 +1,8 @@
-# 底座打磨 selected region 分区算法 v2
+# 底座打磨自动 selected-region 分区算法
 
-> 说明：本文描述自动/拉线分区的算法背景。手动 UV 圈选模式属于独立的
-> manifest v2 clip 流程，操作说明见 `README.md`，约束见 `PRINCIPLES.md`。
+> 说明：本文只描述自动 face-id 分区算法。手动 boundary/slab/pick 属于独立的
+> manifest v2 raster-domain 流程，操作说明见 `README.md`，字段见
+> `MANIFEST_SCHEMA.md`，约束与历史决策见 `PRINCIPLES.md` 和 `DECISION_LOG.md`。
 
 本文说明 `scripts/region_partitioning.py` 当前的 selected region 预处理逻辑。它只属于
 `experiments/base_casting_abb6700` 实验层，不修改 `src/` 软件库，也不改变项目 `.rsp.json`
@@ -105,7 +106,7 @@ v2 会使用 patch 的 nominal angle，把 patch 顶点旋转到对应的 base X
 例如一个 `800 x 2400` 的面，如果 nominal angle 下只有 base Y 超过 `2000`，会优先沿
 base Y 切成两个约 `800 x 1200` 的小区。
 
-## 6. 孔洞和边界
+## 6. 自动分区路径的孔洞和边界
 
 孔洞和边界外不在分区脚本里重复判断。后续路径生成使用
 `src/robot_studio_qt/path_planning/mesh_raster.py`：
@@ -114,7 +115,12 @@ base Y 切成两个约 `800 x 1200` 的小区。
 - 采样点必须通过 barycentric 判断落回某个三角面；
 - 孔洞没有三角面，外边界外也没有三角面，因此不会生成路径点。
 
-这部分属于通用路径规划库，当前实验只调用，不修改。
+这部分属于自动/legacy face-id region 的通用路径规划库。
+
+手动 manifest v2 不使用本节方法决定加工边界。它由
+`scripts/raster_domain.py` 直接在二维 `clip_polygon` 内生成 scanline，从 interval
+中减去 `exclude_polygons`，再沿 `raster_chart.normal` 射线命中选中 STL。STL 在该
+流程中只提供 XYZ、face id 和 facet normal。两条路径不能混写成同一个算法说明。
 
 ## 7. 干涉检测预留
 

@@ -3,6 +3,9 @@
 This file is for Codex/agents taking over this experiment. It explains the
 active architecture, script responsibilities, and hard boundaries. For algorithm
 details, read `PRINCIPLES.md`. For how to run the workflow, read `README.md`.
+Before changing partition architecture, read `DECISION_LOG.md`; for persisted
+fields read `MANIFEST_SCHEMA.md`; for known failures and acceptance checks read
+`TROUBLESHOOTING.md` and `VALIDATION.md`.
 
 ## Active Architecture
 
@@ -63,6 +66,12 @@ patch.
   generates boundary-UV raster paths, and exports per-region ABB RAPID modules,
   point CSVs, and summary tables.
 
+- `scripts/raster_domain.py`
+  Experiment-owned manual-v2 planner. It builds the 2D chart domain, derives
+  per-patch scan axes, subtracts hole intervals, ray-projects samples onto the
+  selected STL cells, and returns XYZ plus facet normals. Do not replace this
+  with STL cell coloring or mesh clipping.
+
 - `scripts/optimal_y_selection.py`
   Lightweight selector for dual-robot rail experiments. It chooses one candidate
   per region by `max(abs(world_y))` over processing waypoints only. Do not add
@@ -93,6 +102,9 @@ patch.
 - Do not make full per-waypoint IK the main batch loop.
 - Risky or exploratory algorithms should start in `experimental_algorithms/`
   unless they are already part of this experiment's reusable script layer.
+- For manual manifest v2, the raster polygon owns the machining boundary. STL
+  cells only provide ray hits and normals. Preview colors use a raster texture,
+  never cell-centroid classification or clipped replacement geometry.
 
 ## 中文说明
 
