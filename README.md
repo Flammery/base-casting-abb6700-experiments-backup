@@ -54,6 +54,28 @@ project/test-0704-selected.rsp.json
 所以只要第 2 步生成了 `latest_partitioned.rsp.json`，第 3 步会自动读取分区后的
 输入。
 
+## 手动 UV 分区
+
+需要按实际加工区域圈选时，在实验面板中执行“手动区域划分”，选择目标
+`region` 后选择一种模式：
+
+- **面边界式**：使用拉线，在局部 UV 域内切开边界两侧的区域；
+- **贯穿式**：使用拉线，按整条分割带切开区域；
+- **圈选区域式**：使用矩形或多边形，只保留圈出的加工区域，可连续圈选多个区域。
+
+圈选模式下，矩形由拖拽生成，多边形靠近起点会自动闭合；可使用“上一个/下一个”
+切换多个 selected region。点击“应用”后会写出项目文件和同名 manifest，例如：
+
+```text
+inputs/latest_partitioned.rsp.json
+inputs/latest_partitioned_manifest.json
+```
+
+manifest v2 会记录 `partition_mode`、`barriers_by_region`、
+`picked_polygons_by_region` 以及每个 patch 的 `clip_space` 和 `raster_chart`。
+`.rsp.json` 仍只保存原有的 `selected_path_face_regions`；圈选边界只由导出器读取
+manifest 后作为 raster-domain clip 使用，不改变项目 schema。
+
 ## 常用命令
 
 查看分区结果但不写文件：

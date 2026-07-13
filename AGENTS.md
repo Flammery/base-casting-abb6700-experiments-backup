@@ -31,6 +31,19 @@ Do not change `src/` or the UI/project schema for experiment-only behavior. The
 project still stores only `selected_path_face_regions`; labels such as `6.1` and
 `6.2` belong in the partition manifest.
 
+Manual partitioning is implemented in `ui/manual_partition_dialog.py` and
+`scripts/manual_region_partitioning.py`. Keep the three modes distinct:
+`boundary` and `slab` use drawn barriers, while `pick` uses rectangle or polygon
+clip areas. The dialog writes manifest version 2 with per-region barriers and
+picked polygons. The `.rsp.json` file remains schema-compatible and must not be
+used to persist the drawn geometry.
+
+When changing manual partitioning, verify both the preview and the exporter:
+the preview should show the same raster-domain clip that
+`window_conf_export.py` applies to generated samples. Keep holes from the mesh
+boundary as exclusions, and keep each picked polygon as an independent output
+patch.
+
 ## Script Responsibilities
 
 - `scripts/region_partition_preprocess.py`

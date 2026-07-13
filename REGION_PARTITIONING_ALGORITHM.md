@@ -1,5 +1,8 @@
 # 底座打磨 selected region 分区算法 v2
 
+> 说明：本文描述自动/拉线分区的算法背景。手动 UV 圈选模式属于独立的
+> manifest v2 clip 流程，操作说明见 `README.md`，约束见 `PRINCIPLES.md`。
+
 本文说明 `scripts/region_partitioning.py` 当前的 selected region 预处理逻辑。它只属于
 `experiments/base_casting_abb6700` 实验层，不修改 `src/` 软件库，也不改变项目 `.rsp.json`
 schema。

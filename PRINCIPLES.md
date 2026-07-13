@@ -37,6 +37,35 @@ The experiment layer owns:
 - RAPID grouping;
 - phase-specific assumptions.
 
+## Manual UV Partitioning
+
+Manual partitioning is an experiment-layer clipping operation. It must not
+rewrite the project schema or replace the selected face-id regions.
+
+The UI supports three explicit modes:
+
+- `boundary`: a drawn barrier is interpreted against the local raster boundary
+  and produces clipped patches on either side;
+- `slab`: a drawn barrier creates a through-cut across the local raster domain;
+- `pick`: rectangles and free-form polygons define the exact areas to retain.
+
+All three modes operate in the region's local raster UV chart. A picked polygon
+is a clip polygon, not a new mesh region: the exporter samples only points inside
+the polygon and outside any generated hole polygons. Multiple picked polygons
+produce independent patches labelled from the source region, such as `1_1` and
+`1_2`.
+
+The v2 manual manifest is the source of truth for these clips. It records the
+mode and per-region input geometry, while each patch records `clip_space`,
+`raster_chart`, `clip_polygon`, `exclude_polygons`, and source face ids. An
+unchanged or unselected region must remain available to the normal exporter.
+
+Manual selection is intentionally separate from automatic curvature and
+bottleneck partitioning: use automatic partitioning for geometry-derived
+boundaries, and manual UV clipping when the operator has a known machining
+area. Do not introduce global XYZ split lines or mutate `src/` to support this
+experiment.
+
 ## Partition Preprocessing Algorithm
 
 The partition preprocessor is stage 2 of the workflow. It reads selected regions

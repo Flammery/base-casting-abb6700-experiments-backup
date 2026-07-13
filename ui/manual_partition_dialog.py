@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QDialog,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QRubberBand,
     QVBoxLayout,
 )
 
@@ -89,6 +90,8 @@ class BarrierView(QGraphicsView):
         self._start: QPointF | None = None
         self._rubber_line: QGraphicsLineItem | None = None
         self._rubber_polygon: QGraphicsPolygonItem | None = None
+        self._rect_start: QPoint | None = None
+        self._rect_band: QRubberBand | None = None
         self._polygon_points: list[QPointF] = []
         self._polygon_items: list[QGraphicsLineItem] = []
         self._polygon_preview_item: QGraphicsPolygonItem | None = None
@@ -139,8 +142,11 @@ class BarrierView(QGraphicsView):
             )
             self._rubber_line.setZValue(30)
         else:
-            self._rubber_polygon = self.scene().addPolygon(QPolygonF(), QPen(QColor(255, 70, 70), 3), QBrush(QColor(255, 70, 70, 60)))
-            self._rubber_polygon.setZValue(35)
+            self._start = None
+            self._rect_start = event.position().toPoint()
+            self._rect_band = QRubberBand(QRubberBand.Shape.Rectangle, self.viewport())
+            self._rect_band.setGeometry(QRect(self._rect_start, self._rect_start))
+            self._rect_band.show()
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         if self._rotate_anchor is not None:
@@ -152,9 +158,8 @@ class BarrierView(QGraphicsView):
             point = self.mapToScene(event.position().toPoint())
             self._rubber_line.setLine(self._start.x(), self._start.y(), point.x(), point.y())
             return
-        if self._draw_mode == "rect" and self._start is not None and self._rubber_polygon is not None:
-            point = self.mapToScene(event.position().toPoint())
-            self._rubber_polygon.setPolygon(_scene_rect_polygon(self._start, point))
+        if self._draw_mode == "rect" and self._rect_start is not None and self._rect_band is not None:
+            self._rect_band.setGeometry(QRect(self._rect_start, event.position().toPoint()).normalized())
             return
         super().mouseMoveEvent(event)
 
@@ -173,15 +178,16 @@ class BarrierView(QGraphicsView):
             if (start - end).manhattanLength() > 1.0:
                 self.barrier_drawn.emit((model_xy_from_scene_point(start), model_xy_from_scene_point(end)))
             return
-        if self._draw_mode == "rect" and self._start is not None and self._rubber_polygon is not None:
-            end = self.mapToScene(event.position().toPoint())
-            start = self._start
-            rubber_polygon = self._rubber_polygon
-            self._rubber_polygon = None
-            self._start = None
-            self.scene().removeItem(rubber_polygon)
-            if abs(start.x() - end.x()) > 1.0 and abs(start.y() - end.y()) > 1.0:
-                self.rect_drawn.emit(tuple(model_xy_from_scene_point(point) for point in _scene_rect_points(start, end)))
+        if self._draw_mode == "rect" and self._rect_start is not None and self._rect_band is not None:
+            rect = QRect(self._rect_start, event.position().toPoint()).normalized()
+            self._rect_band.hide()
+            self._rect_band.deleteLater()
+            self._rect_band = None
+            self._rect_start = None
+            if rect.width() > 2 and rect.height() > 2:
+                viewport_points = [rect.topLeft(), rect.topRight(), rect.bottomRight(), rect.bottomLeft()]
+                scene_points = [self.mapToScene(point) for point in viewport_points]
+                self.rect_drawn.emit(tuple(model_xy_from_scene_point(point) for point in scene_points))
             return
         if self._draw_mode == "polygon":
             return
@@ -193,6 +199,11 @@ class BarrierView(QGraphicsView):
         if self._rubber_polygon is not None:
             self.scene().removeItem(self._rubber_polygon)
             self._rubber_polygon = None
+        if self._rect_band is not None:
+            self._rect_band.hide()
+            self._rect_band.deleteLater()
+            self._rect_band = None
+            self._rect_start = None
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
@@ -246,7 +257,10 @@ class BarrierView(QGraphicsView):
         return _distance_scene(a, b) <= self._snap_radius_scene()
 
     def _snap_radius_scene(self) -> float:
-        scale = max(abs(self.transform().m11()), abs(self.transform().m22()), 1e-6)
+        transform = self.transform()
+        scale_x = (transform.m11() ** 2 + transform.m12() ** 2) ** 0.5
+        scale_y = (transform.m21() ** 2 + transform.m22() ** 2) ** 0.5
+        scale = max(scale_x, scale_y, 1e-6)
         return self._snap_radius_px / scale
 
     def _refresh_polygon_preview(self) -> None:
