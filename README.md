@@ -96,12 +96,11 @@ manifest 后作为 raster-domain clip 使用，不改变项目 schema。
 显示路径，不创建整批 Optimal-Y 输出。手动 v2 的颜色区域由二维 RGBA mask 作为
 texture 显示；STL 不会被切割或重建。
 
-### “开始”与“开始-1”
+### “开始”的自动路径策略
 
 - 第一行“开始”使用默认 `auto` planner：先快速判断孔 polygon 是否与当前 patch 相交；
   无孔 patch 使用普通 raster，有孔 patch 才进入 cell/绕孔规划。普通采样后若发现同一
   scanline 被拆成多个 run，也会安全升级为 hole-aware；
-- 第二行“开始-1”强制所有 patch 使用 `hole-aware`，用于对照和排障；
 - `auto` 的两类路径都只保留每个 patch 的首尾安全位置；
 - 新策略结果目录追加 `_hole_aware`，不会覆盖同日 legacy 输出；
 - “快速预览路径”目前仍是 legacy 预览，不能用它判断 hole-aware 的最终顺序。
@@ -141,7 +140,7 @@ python experiments\base_casting_abb6700\scripts\window_conf_export.py
 python experiments\base_casting_abb6700\scripts\runs\optimal_y_score_x3500_z440.py
 ```
 
-从命令行运行与“开始-1”相同的新策略：
+从命令行强制所有 patch 使用 hole-aware（仅用于排障/对照）：
 
 ```powershell
 python experiments\base_casting_abb6700\scripts\runs\optimal_y_score_configurable.py --project experiments\base_casting_abb6700\inputs\latest_partitioned.rsp.json --planner hole-aware --model-x=3700 --model-y=-1900,100,1900 --model-z=440 --angles 0,180
@@ -165,7 +164,7 @@ python experiments\base_casting_abb6700\scripts\runs\optimal_y_score_configurabl
   RAPID、TXT、点位 CSV、汇总 CSV、summary JSON、实验报告。
 
 - `experimental_algorithms/`
-  更激进或尚未稳定的算法原型；当前包含 UI“开始-1”调用的
+  更激进或尚未稳定的算法原型；当前包含 auto 按需调用的
   `hole_aware_raster.py`。
 
 ## 脚本说明
@@ -236,8 +235,8 @@ python experiments\base_casting_abb6700\scripts\runs\optimal_y_score_configurabl
 - 每个输出 region 后续独立规划和导出。
 - RAPID 导出使用 base window、boundary-UV raster、`base_y_aligned` 姿态、固定
   confdata 和 `ConfL \Off;`。
-- 默认 `auto` 按 patch 在普通 raster 与 hole-aware 之间分流；`legacy` 仅保留为 CLI
-  回退策略，“开始-1”强制 hole-aware。
+- 默认 `auto` 按 patch 在普通 raster 与 hole-aware 之间分流；`legacy` 和强制
+  `hole-aware` 仅保留为 CLI 排障/回退策略。
 
 ## STEP/CAD precise-surface experiment entry
 

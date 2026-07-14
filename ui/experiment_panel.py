@@ -83,7 +83,6 @@ class ExperimentPanel(QWidget):
         self.boundary_margin.setPlaceholderText("6")
         self.boundary_margin.setFixedWidth(58)
         self.start_button = QPushButton("开始")
-        self.start_hole_aware_button = QPushButton("开始-1")
         self.preview_path_button = QPushButton("快速预览路径")
         self.robotstudio_button = QPushButton("导入 RobotStudio 验证")
         self.robotstudio_timer = QTimer(self)
@@ -129,7 +128,6 @@ class ExperimentPanel(QWidget):
         second_row.addWidget(self.window_limits)
         second_row.addWidget(QLabel("边缘余量"))
         second_row.addWidget(self.boundary_margin)
-        second_row.addWidget(self.start_hole_aware_button)
         second_row.addStretch(1)
 
         layout.addLayout(first_row)
@@ -147,7 +145,6 @@ class ExperimentPanel(QWidget):
         self.apply_partition_button.clicked.connect(self.apply_partition)
         self.preview_path_button.clicked.connect(self.preview_paths)
         self.start_button.clicked.connect(self.start_run)
-        self.start_hole_aware_button.clicked.connect(self.start_hole_aware_run)
         self.robotstudio_button.clicked.connect(self.export_to_robotstudio)
         self.robotstudio_timer.timeout.connect(self._poll_robotstudio_status)
         self.input_path.editingFinished.connect(self.refresh_region_count)
@@ -334,9 +331,6 @@ class ExperimentPanel(QWidget):
     def start_run(self) -> None:
         self._start_run_with_planner("auto", "自动连续策略")
 
-    def start_hole_aware_run(self) -> None:
-        self._start_run_with_planner("hole-aware", "绕孔连续策略")
-
     def _start_run_with_planner(self, planner: str, label: str) -> None:
         if self._process is not None:
             QMessageBox.information(self, "正在运行", "当前任务还没有结束。")
@@ -365,7 +359,6 @@ class ExperimentPanel(QWidget):
 
     def _start_process(self, label: str, command: list[str], kind: str) -> None:
         self.start_button.setEnabled(False)
-        self.start_hole_aware_button.setEnabled(False)
         self.apply_partition_button.setEnabled(False)
         self.preview_path_button.setEnabled(False)
         self.robotstudio_button.setEnabled(False)
@@ -395,7 +388,6 @@ class ExperimentPanel(QWidget):
     def _process_finished(self, exit_code: int, _status) -> None:
         self._process = None
         self.start_button.setEnabled(True)
-        self.start_hole_aware_button.setEnabled(True)
         self.apply_partition_button.setEnabled(True)
         self.preview_path_button.setEnabled(True)
         self.robotstudio_button.setEnabled(True)

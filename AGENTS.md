@@ -74,8 +74,8 @@ patch.
   with STL cell coloring or mesh clipping.
 
 - `experimental_algorithms/hole_aware_raster.py`
-  Planner used selectively by default `auto` mode and forced by UI `Start-1` /
-  runner `--planner hole-aware`. It groups raster runs into cells and creates
+  Planner used selectively by default UI/runner `auto` mode and forced only by
+  CLI `--planner hole-aware`. It groups raster runs into cells and creates
   on-surface free-domain connectors. Ordinary auto patches must stay on the
   normal raster fast path.
 

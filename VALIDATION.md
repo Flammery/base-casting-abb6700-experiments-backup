@@ -30,8 +30,8 @@ C:\Users\21093\Desktop\p1\.venv\Scripts\python.exe -m pytest tests -q
 6. 应用后检查模型仍完整，texture 边界无三角碎片，孔洞透明。
 7. 点击快速预览，检查两个 patch 独立生成扫描方向。
 8. 对 legacy 快速预览，检查孔洞内没有蓝色路径，孔洞两侧不被一条直线 MoveL 横跨。
-9. 使用同一参数分别点击“开始”（auto）和“开始-1”（强制 hole-aware），确认输出目录
-   分别为普通目录和 `_hole_aware` 目录，互不覆盖。
+9. 点击唯一“开始”运行 auto；如需对照，再从 CLI 强制 `--planner hole-aware`，确认输出
+   目录分别为普通目录和 `_hole_aware` 目录，互不覆盖。
 10. 检查 hole-aware 点 CSV：先完整覆盖一个 cell/孔侧，再通过有效表面 connector
     进入另一侧；任何相邻点连线均不得穿孔或越出 clip polygon。
 11. 检查 hole-aware RAPID：每个 patch 只有第一个安全目标使用 MoveJ，中间 processing
@@ -60,7 +60,7 @@ RobotStudio 验收。
 
 ## Hole-aware 限制验收
 
-正式使用 auto 或“开始-1”输出前还必须确认：
+正式使用 auto 或 CLI 强制 hole-aware 输出前还必须确认：
 
 1. `summary.json` 的 `planner` 为 `hole-aware`；
 2. 目标 patch 具有 `raster_chart`、`clip_polygon`，孔洞正确写入

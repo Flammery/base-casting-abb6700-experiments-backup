@@ -85,11 +85,12 @@
   按行处理还会在孔洞两侧频繁切换。
 - 决定：“开始”和 configurable runner 默认运行 `auto`：先快速判断与当前 patch 相关的
   hole polygon，无孔时使用普通 raster，有孔或普通采样后同一 scanline 出现多个 run 时
-  使用 `experimental_algorithms/hole_aware_raster.py`。第二行“开始-1”强制 hole-aware。
+  使用 `experimental_algorithms/hole_aware_raster.py`。UI 只保留一个自动“开始”按钮；
+  强制 hole-aware 仅通过 CLI 提供。
   auto 的两类路径都只保留首尾安全位置。
 - 约束与影响：目标必须有 `raster_chart + clip_polygon`；connector 失败必须 deferred；
   快速预览仍为 legacy；新输出目录追加 `_hole_aware`；不得把二维避孔视为碰撞/IK认证。
-- 后续：真实 RobotStudio 验证完成后，另行决定是否删除“开始-1”和 legacy CLI 回退。
+- 后续：真实 RobotStudio 验证完成后，另行决定是否保留强制 hole-aware 和 legacy CLI 回退。
 - 详细限制：见 `HOLE_AWARE_PLANNER.md`。
 
 ## D012 RobotStudio 独立验证工作站导出

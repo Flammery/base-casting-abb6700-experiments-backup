@@ -6,7 +6,6 @@
 RAPID/CSV/Optimal-Y 导出。默认“开始”采用自动混合策略，不要求所有面都运行绕孔算法。
 
 - UI 第一行“开始”：`auto`，逐 patch 快速分流；
-- UI 第二行“开始-1”：强制 `hole-aware`，用于对照和排障；
 - CLI：`scripts/runs/optimal_y_score_configurable.py --planner hole-aware`；
 - CLI 默认 planner 为 `auto`；显式强制新策略时输出目录追加 `_hole_aware`；
 - 当前“快速预览路径”仍调用 legacy `plan_region_uv()`，不会预览 hole-aware 顺序。
@@ -86,6 +85,6 @@ safe_z = endpoint_world_z + 100 mm
 
 ## 替换 legacy 的条件
 
-默认 runner 已使用 `auto`，但强制 hole-aware 的“开始-1”仍应保留到真实模型完成
-`VALIDATION.md` 验收。确认自动分类、碰撞、可达性、工具包络和安全位置后，可删除
-“开始-1”；`legacy` CLI 回退是否保留再单独决定。
+默认 runner 和唯一 UI“开始”均使用 `auto`。强制 `hole-aware` 与 `legacy` 只保留为
+CLI 排障/回退选项；真实模型仍必须完成 `VALIDATION.md` 中的碰撞、可达性、工具包络和
+安全位置验收。

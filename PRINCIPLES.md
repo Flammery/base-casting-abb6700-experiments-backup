@@ -162,8 +162,8 @@ Region path rules:
 
 The default UI `Start` and configurable runner use `auto`: patches with relevant
 hole polygons (or multiple runs on one sampled scanline) use hole-aware order,
-while ordinary patches use the normal raster sampler. UI `Start-1` forces the
-hole-aware planner for comparison and troubleshooting:
+while ordinary patches use the normal raster sampler. Forced `hole-aware` and
+`legacy` remain CLI-only troubleshooting modes:
 
 - subtract holes before ordering motion;
 - decompose scanline runs into boustrophedon cells;

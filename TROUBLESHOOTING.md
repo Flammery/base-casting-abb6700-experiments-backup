@@ -31,7 +31,7 @@
 - 检查射线未命中后是否开启了新 segment。
 - 不要仅删除孔内点后继续连接孔洞两侧 waypoint。
 
-## 点击“开始-1”后全部进入 deferred
+## CLI 强制 hole-aware 后全部进入 deferred
 
 - 检查输入是否为 manual manifest v2。
 - 检查目标 patch 是否同时具有 `raster_chart` 和 `clip_polygon`。
@@ -48,11 +48,11 @@
   孔洞造成直线跨越；查看实际 mesh/ray miss 是否形成了缺口。
 - `summary.json` 的两个 auto path count 按候选路径计数，不等于唯一面数。
 
-## “开始”或“开始-1”完成但快速预览仍显示旧抬刀路径
+## “开始”完成但快速预览仍显示旧抬刀路径
 
 - 这是当前已知限制，不是 planner 参数失效。
-- “快速预览路径”仍调用 legacy `plan_region_uv()`；“开始”通过子进程调用 auto，
-  “开始-1”调用强制 `--planner hole-aware`。
+- “快速预览路径”仍调用 legacy `plan_region_uv()`；“开始”通过子进程调用 auto。
+- 强制 `--planner hole-aware` 只存在于 CLI，不会改变快速预览。
 - 请检查 `_hole_aware` 目录中的点 CSV 和 RAPID，或导入 RobotStudio 验证。
 
 ## 新路径不穿孔但离孔边太近
@@ -69,7 +69,7 @@
 - 当前正确行为是 deferred；禁止为了出结果而恢复穿孔直线。
 - 若真实通道必须使用，应先单独改进 connector 分辨率/导航域并增加相应回归测试。
 
-## “开始”和“开始-1”结果互相覆盖
+## Auto 和 CLI 强制 hole-aware 结果互相覆盖
 
 - 默认情况下新策略目录会追加 `_hole_aware`。
 - 如果显式传入相同的 `--output-dir`，目录隔离由调用者负责。
