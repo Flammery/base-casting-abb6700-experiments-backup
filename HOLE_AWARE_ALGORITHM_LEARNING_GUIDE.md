@@ -1,5 +1,12 @@
 # Hole-Aware、Cell 图、贪心算法与 A* 入门
 
+> **版本说明（2026-07-15）**：本文对 cell 图、贪心和 A* 的讲解仍可作为算法学习资料，
+> 其中标为“当前实现”的连续贴面 connector 内容描述的是 2026-07-13 原型，已与现在不同。
+> 当前工程保留 run/cell 分解，但按原扫描顺序完整加工每个 cell；cell 之间法向抬刀并
+> 离面转场，不再运行 cell 图贪心、A* 或 connector ray-lift。当前合同见
+> `HOLE_AWARE_PLANNER.md`，决策见 `DECISION_LOG.md` 的 D013。
+> manual-v2 与未划分的原始 face-id region 现在都能进入这套 cell 抬刀规划。
+
 本文面向第一次接触路径规划算法的读者，结合本项目 `1_2` 蓝色加工区域的真实实验，解释：
 
 - 明明肉眼看不到孔，为什么 `auto` 仍会进入 hole-aware；

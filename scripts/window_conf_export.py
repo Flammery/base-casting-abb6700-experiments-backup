@@ -47,7 +47,11 @@ from robot_studio_qt.path_planning.transforms import WorkpieceTransform
 from robot_studio_qt.polishing_tool import tool_to_rapid
 from robot_studio_qt.project import load_project_file, save_project_file
 from raster_domain import point_to_uv, raster_samples
-from hole_aware_raster import hole_aware_raster_samples, polygon_has_relevant_holes  # noqa: F401 - runner API
+from hole_aware_raster import (  # noqa: F401 - runner API
+    hole_aware_raster_samples,
+    polygon_has_relevant_holes,
+    projected_raster_cell_samples,
+)
 
 
 PARTITIONED_PROJECT_PATH = EXPERIMENT_DIR / "inputs" / "latest_partitioned.rsp.json"
@@ -83,8 +87,6 @@ SPACING = 50.0
 POINT_STEP = 50.0
 BOUNDARY_MARGIN = 6.0
 SAFE_DISTANCE = 150.0
-SAFE_BASE_X_OFFSET = -100.0
-SAFE_BASE_Z_OFFSET = 100.0
 CONF_Y_NEGATIVE = (-1, -1, 0, 1)
 CONF_Y_NONNEGATIVE = (0, 0, -1, 1)
 TOOL_LOAD_MASS_KG = 1.0
@@ -341,26 +343,16 @@ def build_motion(placement, path):
     return motion
 
 
-def base_safe_waypoint(placement, waypoint, index: int):
-    """Offset an endpoint in base/world coordinates, then convert it to wobj."""
-    position = (
-        waypoint.position_world[0] + SAFE_BASE_X_OFFSET,
-        waypoint.position_world[1],
-        waypoint.position_world[2] + SAFE_BASE_Z_OFFSET,
-    )
-    transform = WorkpieceTransform(placement)
-    return replace(waypoint, index=index, position_world=position, position_wobj=transform.world_point_to_wobj(position))
-
-
 def build_hole_aware_motion(placement, path):
-    """Add one global base-coordinate safe point at each end of a continuous path."""
-    if not path.waypoints:
-        return []
-    return [
-        base_safe_waypoint(placement, path.waypoints[0], -1),
-        *path.waypoints,
-        base_safe_waypoint(placement, path.waypoints[-1], len(path.waypoints)),
-    ]
+    """Finish each raster cell, then retract and transfer above the surface.
+
+    Hole-aware line segment ids identify complete cells rather than individual
+    scanline runs.  build_motion() therefore emits exactly one approach and one
+    departure per cell.  RAPID uses MoveL for the local retract/approach and
+    MoveJ between the two lifted endpoints, so the tool never needs a supported
+    on-surface connector across a hole or mesh gap.
+    """
+    return build_motion(placement, path)
 
 
 def base_y_aligned_quaternion(normal_world: tuple[float, float, float], previous: Quaternion | None) -> Quaternion:
@@ -719,29 +711,53 @@ def plan_region_uv_hole_aware(
     exclude_polygons: list[list[list[float]]] | None = None,
     raster_chart: dict | None = None,
 ) -> PathResult:
-    """Plan one continuous, hole-aware raster path in the manual UV domain."""
+    """Plan complete raster cells with lifted transfers between cells."""
     settings = replace(base_settings, feed_direction=feed_variant)
-    if not raster_chart or not clip_polygon:
+    has_chart_domain = bool(raster_chart and clip_polygon)
+    has_partial_domain = bool(raster_chart) != bool(clip_polygon)
+    if has_partial_domain or (not has_chart_domain and bool(exclude_polygons)):
         return PathResult(
             PathSource.MESH,
             placement.name,
             settings,
-            message="Hole-aware planning requires a raster_chart and clip_polygon.",
+            message="Hole-aware planning requires raster_chart and clip_polygon together when a manual domain is supplied.",
         )
     triangles = read_triangles(polydata, region)
     if not triangles:
         return PathResult(PathSource.MESH, placement.name, settings, message="Mesh has no selected triangular surface cells.")
-    domain_samples, diagnostics = hole_aware_raster_samples(
-        clip_polygon,
-        exclude_polygons or [],
-        triangles,
-        raster_chart,
-        settings.spacing,
-        settings.point_step,
-        settings.boundary_margin,
-        settings.bidirectional,
-        feed_variant == RasterFeedDirection.LONG_SIDE,
-    )
+    if has_chart_domain:
+        domain_kind = "manual-v2"
+        domain_samples, diagnostics = hole_aware_raster_samples(
+            clip_polygon,
+            exclude_polygons or [],
+            triangles,
+            raster_chart,
+            settings.spacing,
+            settings.point_step,
+            settings.boundary_margin,
+            settings.bidirectional,
+            feed_variant == RasterFeedDirection.LONG_SIDE,
+        )
+    else:
+        domain_kind = "projected-face-id"
+        normal = average_normal(triangles)
+        origin = mesh_centroid(triangles)
+        long_axis, short_axis, _long_range, _short_range = uv_axes_from_region(triangles)
+        if feed_variant == RasterFeedDirection.LONG_SIDE:
+            u_axis = long_axis
+            v_axis = normalize(cross(normal, u_axis), fallback=short_axis)
+        else:
+            u_axis = short_axis
+            v_axis = normalize(cross(normal, u_axis), fallback=long_axis)
+        projected = [project_triangle(triangle, origin, u_axis, v_axis) for triangle in triangles]
+        projected_samples = sample_projected_mesh(projected, settings)
+        projected_samples = split_discontinuous_raster_segments(projected_samples, settings.point_step)
+        domain_samples, diagnostics = projected_raster_cell_samples(
+            projected_samples,
+            origin,
+            u_axis,
+            settings.spacing,
+        )
     if not domain_samples:
         return PathResult(
             PathSource.MESH,
@@ -778,8 +794,74 @@ def plan_region_uv_hole_aware(
         placement.name or "wobj0",
         settings,
         waypoints,
-        f"Generated {len(waypoints)} hole-aware waypoints in {diagnostics['cell_count']} cells with {diagnostics['connector_count']} connectors.",
+        (
+            f"Generated {len(waypoints)} hole-aware waypoints in "
+            f"{diagnostics['cell_count']} cells with {diagnostics['transfer_count']} lifted transfers "
+            f"from {domain_kind}."
+        ),
     )
+
+
+def plan_region_uv_auto(
+    polydata,
+    placement,
+    base_settings: RasterPlannerSettings,
+    region: set[int],
+    feed_variant: RasterFeedDirection,
+    clip_polygon: list[list[float]] | None = None,
+    exclude_polygons: list[list[list[float]]] | None = None,
+    raster_chart: dict | None = None,
+) -> tuple[PathResult, bool, str]:
+    """Select regular raster or cell-lift planning and report the reason.
+
+    Explicit excludes with positive-area overlap include both a true hole fully
+    contained by the clip polygon and an exclusion that cuts through its edge.
+    Even without an explicit exclude, multiple runs on one scanline reveal an
+    unsupported surface gap and switch to the same safe cell-transfer motion.
+    """
+    holes = exclude_polygons or []
+    if polygon_has_relevant_holes(clip_polygon, holes):
+        return (
+            plan_region_uv_hole_aware(
+                polydata,
+                placement,
+                base_settings,
+                region,
+                feed_variant,
+                clip_polygon,
+                holes,
+                raster_chart,
+            ),
+            True,
+            "exclude-overlap",
+        )
+
+    regular_path = plan_region_uv(
+        polydata,
+        placement,
+        base_settings,
+        region,
+        feed_variant,
+        clip_polygon,
+        holes,
+        raster_chart,
+    )
+    if path_has_split_scanlines(regular_path):
+        return (
+            plan_region_uv_hole_aware(
+                polydata,
+                placement,
+                base_settings,
+                region,
+                feed_variant,
+                clip_polygon,
+                holes,
+                raster_chart,
+            ),
+            True,
+            "split-scanline",
+        )
+    return regular_path, False, "regular-raster"
 
 
 def export_path_variant(
@@ -817,6 +899,7 @@ def export_path_variant(
         "orientation_mode": ORIENTATION_MODE,
         "axis_mode": AXIS_MODE,
         "planner": planner_label or ("hole-aware" if hole_aware else "legacy"),
+        "motion_strategy": "cell-lift-transfer" if hole_aware else "segment-lift-transfer",
     }
     normalize_tool_load(row)
     return row

@@ -13,6 +13,7 @@ if str(SRC) not in sys.path:
 from robot_studio_qt.kinematics.model import WorkpiecePlacement
 from robot_studio_qt.kinematics.orientation import Quaternion
 from robot_studio_qt.path_planning.mesh_raster import (
+    MeshTriangle,
     ProjectedTriangle,
     encoded_raster_line_id,
     raster_segment_id,
@@ -90,7 +91,7 @@ def test_build_motion_adds_safe_approach_for_each_raster_segment() -> None:
     assert len(motion) == 8
 
 
-def test_hole_aware_motion_has_only_global_base_safe_points() -> None:
+def test_hole_aware_motion_retracts_and_approaches_each_cell() -> None:
     module = _load_window_export_module()
     path = SimpleNamespace(
         waypoints=[
@@ -101,10 +102,12 @@ def test_hole_aware_motion_has_only_global_base_safe_points() -> None:
 
     motion = module.build_hole_aware_motion(WorkpiecePlacement(), path)
 
-    assert len(motion) == 4
-    assert motion[0].position_world == (900.0, 50.0, 300.0)
-    assert motion[-1].position_world == (1000.0, 60.0, 320.0)
-    assert [waypoint.index for waypoint in motion].count(-1) == 1
+    assert len(motion) == 6
+    assert motion[0].position_world == (1000.0, 50.0, 350.0)
+    assert motion[2].position_world == (1000.0, 50.0, 350.0)
+    assert motion[3].position_world == (1100.0, 60.0, 370.0)
+    assert motion[-1].position_world == (1100.0, 60.0, 370.0)
+    assert [waypoint.index for waypoint in motion].count(-1) == 2
 
 
 def test_split_scanline_detection_distinguishes_holes_from_normal_lines() -> None:
@@ -124,3 +127,38 @@ def test_split_scanline_detection_distinguishes_holes_from_normal_lines() -> Non
 
     assert module.path_has_split_scanlines(normal) is False
     assert module.path_has_split_scanlines(split) is True
+
+
+def test_hole_aware_plans_projected_face_id_region_without_manifest(monkeypatch) -> None:
+    module = _load_window_export_module()
+    normal = (0.0, 0.0, 1.0)
+    triangles = [
+        MeshTriangle(1, ((-120.0, 0.0, 0.0), (120.0, 0.0, 0.0), (120.0, 30.0, 0.0)), normal, 3600.0),
+        MeshTriangle(2, ((-120.0, 0.0, 0.0), (120.0, 30.0, 0.0), (-120.0, 30.0, 0.0)), normal, 3600.0),
+    ]
+    raw_samples = []
+    for line_index, u_values in (
+        (0, [80.0, 100.0]),
+        (1, [100.0, 80.0, 60.0, 40.0, -40.0, -60.0, -80.0, -100.0]),
+        (2, list(range(-100, 101, 20))),
+    ):
+        raw_samples.extend(
+            (encoded_raster_line_id(0, line_index), point_id, 1, (u, line_index * 10.0, 0.0), normal)
+            for point_id, u in enumerate(u_values)
+        )
+    monkeypatch.setattr(module, "read_triangles", lambda _polydata, _region: triangles)
+    monkeypatch.setattr(module, "sample_projected_mesh", lambda _projected, _settings: raw_samples)
+    settings = RasterPlannerSettings(spacing=10.0, point_step=20.0, boundary_margin=0.0)
+
+    path = module.plan_region_uv_hole_aware(
+        object(),
+        WorkpiecePlacement(),
+        settings,
+        {1, 2},
+        module.RasterFeedDirection.LONG_SIDE,
+    )
+
+    assert path.waypoints
+    assert "3 cells" in path.message
+    assert "projected-face-id" in path.message
+    assert {raster_segment_id(waypoint.line_id) for waypoint in path.waypoints} == {0, 1, 2}

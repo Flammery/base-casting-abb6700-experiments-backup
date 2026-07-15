@@ -1,90 +1,68 @@
-# Hole-Aware 连续光栅策略
+# Hole-Aware 分区光栅与抬刀转场策略
 
-## 状态与入口
+## 当前状态
 
-该策略是 2026-07-13 加入的带孔 patch 连续贴面加工方案，已经接入实验 UI 和真实
-RAPID/CSV/Optimal-Y 导出。默认“开始”采用自动混合策略，不要求所有面都运行绕孔算法。
+2026-07-15 起，带孔规划不再要求不同 cell 之间存在连续贴面的 A*/connector 路径。
+当前策略是：**cell 内完成完整光栅，cell 间法向退刀、离面转移、再法向接近**。
 
-- UI 第一行“开始”：`auto`，逐 patch 快速分流；
-- CLI：`scripts/runs/optimal_y_score_configurable.py --planner hole-aware`；
-- CLI 默认 planner 为 `auto`；显式强制新策略时输出目录追加 `_hole_aware`；
-- 当前“快速预览路径”仍调用 legacy `plan_region_uv()`，不会预览 hole-aware 顺序。
+- UI“开始”和 CLI 默认使用 `auto`；
+- UI“快速预览路径”与正式运行共用 `plan_region_uv_auto()`；
+- CLI `--planner hole-aware` 可强制使用 cell 抬刀策略；
+- manual-v2 patch 和未划分的原始 face-id region 都能建立 cells；
+- `legacy` 仅作为 CLI 排障/对照选项。
 
-## 解决的问题
+## 自动带孔/缺口判定
 
-legacy raster-domain 会把每条扫描 run 编成独立 segment，`build_motion()` 再为每个
-segment 添加法向进退刀点，因此会在扫描线边缘反复抬起。孔洞把同一扫描线切成多个
-interval 后，逐行排序还会造成孔洞两侧频繁切换。
+`auto` 按以下顺序选择：
 
-hole-aware 策略改为：
+1. 判断 manifest 中的 `exclude_polygons` 与当前 `clip_polygon` 是否有正面积重叠；
+2. hole 完全位于 clip 内时，直接属于真正的内部孔；
+3. hole 穿过 clip 边界时也属于相关 exclude，因为它会切掉边缘加工域；
+4. 仅在点或边上接触、没有面积重叠时不切换 planner；
+5. 未发现相关 exclude 时先生成普通 raster；若同一扫描线出现多个 run，则说明 STL
+   ray hit 支撑域存在缺口，切换到相同的 cell 抬刀策略。
 
-1. 继续在二维 raster chart 中扣除 `exclude_polygons`；
-2. 根据相邻扫描线 interval 的重叠关系建立 Boustrophedon cells；
-3. 一个 cell 内连续往复，遇边界直接在有效表面折返；
-4. 先完成当前孔侧 cell，再进入相邻 cell；
-5. cell 间直线穿孔时，在二维有效域内用确定性栅格 A* 查找绕孔路线；
-6. connector 重新采样并逐点 ray lift 到选中 STL；
-7. 整个 patch 只添加全局起点和终点安全位置，中间全部使用 MoveL。
+诊断原因写为：
 
-## Auto 快速分流
+- `exclude-overlap`：显式 exclude 与 clip 有面积重叠；
+- `split-scanline`：普通采样发现同一扫描线存在多个有效 run；
+- `regular-raster`：保持普通光栅。
 
-`auto` 不会先对 20 个面全部运行 cell/A*。每个 patch 的顺序是：
+`summary.json` 记录 `auto_hole_aware_path_count`、`auto_raster_path_count` 和
+`auto_planner_reason_counts`；候选表记录 `planner_reason` 与 `motion_strategy`。
 
-1. 用 polygon 包围盒、点包含和边相交测试，判断 `exclude_polygons` 是否真的与当前
-   `clip_polygon` 相交；manifest 列出的孔在 patch 外时直接忽略；
-2. 命中相关孔时直接调用 hole-aware；
-3. 未命中时运行一次普通 raster；
-4. 线性扫描生成的 waypoint，若发现同一 base scanline 属于多个 segment，说明存在
-   未被快速 polygon 检查捕获的缺口，再升级为 hole-aware；
-5. 普通 raster 不构建 cells、不运行 A*，因此多数无孔面的新增开销只是一遍低成本
-   polygon 检查和 waypoint 线性检查。
+## Cell 路径和转场
 
-`summary.json` 会记录 `auto_hole_aware_path_count` 和 `auto_raster_path_count`。注意计数
-按候选路径（位姿 × 角度 × patch × feed variant），不是模型的唯一面数。
+1. 二维 scanline 先扣除所有 exclude intervals；
+2. ray miss 会立即结束当前 run，禁止 processing motion 跨过无表面区域；
+3. 相邻扫描线中 U 区间连续重叠的 runs 组成一个 Boustrophedon cell；
+4. cell 按首次出现的扫描线、横向位置和稳定 cell id 排序；
+5. 每个 cell 保留自身完整的双向往复光栅，不因下一个 cell 的位置改变顺序；
+6. 每个 cell 起点前和终点后沿局部表面法向偏移 `SAFE_DISTANCE`，当前为 150 mm；
+7. RAPID 在加工点与安全点之间使用 MoveL，在两个 cell 的安全点之间使用 MoveJ。
 
-安全位置在 base/world 坐标中定义：
+因此，空中转场的二维投影可以越过 exclude；加工光栅本身仍不会进入 exclude 或 ray-miss
+区域。当前没有贪心重排，也没有 A*，cell 顺序不会造成“无 connector”而整面 deferred。
 
-```text
-safe_x = endpoint_world_x - 100 mm
-safe_y = endpoint_world_y
-safe_z = endpoint_world_z + 100 mm
-```
+## 限制与验收
 
-偏移后再转换为 `position_wobj` 写入 robtarget。安全点姿态继承对应首末加工点姿态。
+1. manual-v2 使用自身 `raster_chart + clip_polygon`；原始 face-id region 直接使用普通
+   mesh raster 的投影原点、U 轴和已拆分 runs，不要求额外 manifest。
+2. 如果输入带显式 clip/exclude 元数据，则 chart 和 clip 必须成套存在；不能在坐标系
+   不明确时解释 exclude polygon。
+3. `SAFE_DISTANCE=150 mm` 是沿每个端点局部法向的 TCP 偏移，不等于统一世界 Z 安全平面。
+4. cell 间使用 MoveJ，TCP 实际轨迹不保证是两个安全点之间的笛卡尔直线。
+5. 未做机器人可达性、逐点 IK、构型连续性、工具扫掠体或碰撞认证。
+6. exclude 上方可转场只表示 processing path 不接触该二维域；砂轮、主轴、法兰和机器人
+   仍必须在 RobotStudio 中低速/单步验证。
+7. 每个 patch/region 独立规划，不跨区域合并路径。
 
-## 当前限制
+## 失败条件
 
-1. **只支持 manual manifest v2 路径域。** 目标 patch 必须同时具有
-   `raster_chart` 和 `clip_polygon`；缺失时新 planner 返回 deferred，不回退 legacy。
-2. **显式孔洞以 `exclude_polygons` 为准。** ray miss 会形成独立 run，connector 若
-   无法逐点 lift 会失败，但当前不会从任意 STL 缺口自动重建精确孔轮廓。
-3. **没有机器人碰撞和逐点 IK 验证。** `valid` 只表示二维不穿孔且 connector 能投射到
-   表面，不代表 ABB 机器人、工具、法兰或工件无碰撞、可达或构型连续。
-4. **没有刀具扫掠体补偿。** `boundary_margin` 控制 raster 采样余量；connector 的
-   合法性仍按 TCP 点判断，不等价于砂轮半径、刀盘外形或安全包络的 Minkowski offset。
-5. **绕孔不是全局最优。** cell 访问采用“相邻优先、距离次优”的确定性贪心顺序；
-   connector 使用有限分辨率栅格 A*，目标是先稳定避孔，不保证全局最短总路径。
-6. **窄通道可能判定失败。** A* 网格会限制最大节点数并自适应放大分辨率；小于网格
-   分辨率的可通行间隙可能被视为不可行，此时路径进入 deferred，不允许穿孔直连。
-7. **每个 patch 独立。** 不跨 patch 合并路径；每个成功 patch 都有自己的首尾安全点。
-8. **安全点本身未做碰撞验证。** `x-100/z+100` 是当前约定，不保证所有安装位姿下都
-   是实际无碰撞位置，必须在 RobotStudio 低速/单步验证。
-9. **快速预览尚未切换。** UI 中看到的“快速预览路径”仍是 legacy；判断新策略必须看
-   `_hole_aware` 结果中的点 CSV、RAPID 和 RobotStudio 轨迹。
+当前 cell 规划只在以下情况下失败：
 
-## 失败策略
+- 手动 polygon 元数据不完整（chart 与 clip 没有成套提供）；
+- 当前区域没有可投射到选中 STL 的有效 raster samples。
 
-出现以下任一情况时，新策略不得生成穿孔回退路径：
-
-- 缺少 raster chart 或 clip polygon；
-- cell 之间找不到二维有效 connector；
-- connector 任一点 ray lift 失败；
-- 当前区域没有有效 raster samples。
-
-失败区域写入现有 `deferred_paths.csv`，原因来自 `PathResult.message`。
-
-## 替换 legacy 的条件
-
-默认 runner 和唯一 UI“开始”均使用 `auto`。强制 `hole-aware` 与 `legacy` 只保留为
-CLI 排障/回退选项；真实模型仍必须完成 `VALIDATION.md` 中的碰撞、可达性、工具包络和
-安全位置验收。
+旧版 `No free-domain connector between raster cells` 已不再是当前算法的失败条件。
+A*、cell 图遍历和连续贴面 connector 仅保留在学习文档中作为历史方案和后续研究资料。

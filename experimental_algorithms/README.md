@@ -7,8 +7,10 @@ Reserved for later prototypes that should not affect the application source tree
 `hole_aware_raster.py` is intentionally kept here while default `auto` mode
 selects it only for relevant-hole patches; CLI can force it for troubleshooting.
 It groups scanline runs into cells, visits one hole side at a time,
-and routes on-surface connectors. Ordinary auto patches retain the normal raster
-fast path. Its limitations are documented in `../HOLE_AWARE_PLANNER.md`.
+and preserves deterministic complete-cell raster order. The exporter retracts
+and transfers above the surface between cells; it does not route on-surface
+connectors. Ordinary auto patches retain the normal raster fast path. Its
+limitations are documented in `../HOLE_AWARE_PLANNER.md`.
 
 Candidate topics:
 

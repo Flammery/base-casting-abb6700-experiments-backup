@@ -14,7 +14,7 @@ C:\Users\21093\Desktop\p1\.venv\Scripts\python.exe -m pytest tests -q
 - waypoint normal 来自命中三角面；
 - 孔洞内无采样点；
 - 孔洞或射线缺口产生独立 segment；
-- hole-aware 中央孔 cell 分解、禁止横穿孔洞和全局首尾安全点；
+- hole-aware 中央孔 cell 分解、稳定 cell 顺序和每个 cell 的进退刀点；
 - 输出目录日期和长度；
 - 项目输入优先级。
 
@@ -29,20 +29,17 @@ C:\Users\21093\Desktop\p1\.venv\Scripts\python.exe -m pytest tests -q
 5. 创建两个形状方向不同的 patch。
 6. 应用后检查模型仍完整，texture 边界无三角碎片，孔洞透明。
 7. 点击快速预览，检查两个 patch 独立生成扫描方向。
-8. 对 legacy 快速预览，检查孔洞内没有蓝色路径，孔洞两侧不被一条直线 MoveL 横跨。
+8. 检查 auto 快速预览：孔洞内没有蓝色路径，状态栏显示正确的 cell 抬刀数量和判定原因。
 9. 点击唯一“开始”运行 auto；如需对照，再从 CLI 强制 `--planner hole-aware`，确认输出
    目录分别为普通目录和 `_hole_aware` 目录，互不覆盖。
-10. 检查 hole-aware 点 CSV：先完整覆盖一个 cell/孔侧，再通过有效表面 connector
-    进入另一侧；任何相邻点连线均不得穿孔或越出 clip polygon。
-11. 检查 hole-aware RAPID：每个 patch 只有第一个安全目标使用 MoveJ，中间 processing
-    和 connector 全部使用 MoveL，最后 MoveL 到终点安全位置。
-12. 手算首尾安全位置：对应端点 world/base 坐标 `x-100、y不变、z+100`；确认 RAPID
-    中写入的是转换后的 wobj 坐标。
-13. 运行一次正式导出并记录 waypoint/cell/connector/patch 数及 deferred 原因。
+10. 检查 hole-aware 点 CSV：每个 cell 的光栅完整连续，cell 边界有独立安全进退刀点。
+11. 检查 hole-aware RAPID：加工与法向进退刀使用 MoveL，两个 cell 的抬起点之间使用 MoveJ。
+12. 手算法向安全位置：`safe = endpoint + normal × SAFE_DISTANCE`，并确认转换后的 wobj 坐标。
+13. 运行一次正式导出并记录 waypoint/cell/transfer/patch 数、planner reason 和 deferred 原因。
 14. 导入 RobotStudio，低速或单步检查可达性、构型连续、孔边间隙和实际碰撞。
 
-注意：“快速预览路径”当前仍是 legacy，不能用它代替 hole-aware 的 CSV/RAPID 和
-RobotStudio 验收。
+注意：快速预览与正式运行共用自动判定，但它只显示 processing raster，不显示完整的
+RAPID 抬刀/MoveJ 轨迹，因此不能代替 CSV/RAPID 和 RobotStudio 验收。
 
 ## 坐标与 RAPID 验收
 
@@ -63,11 +60,11 @@ RobotStudio 验收。
 正式使用 auto 或 CLI 强制 hole-aware 输出前还必须确认：
 
 1. `summary.json` 的 `planner` 为 `hole-aware`；
-2. 目标 patch 具有 `raster_chart`、`clip_polygon`，孔洞正确写入
-   `exclude_polygons`；
-3. `deferred_paths.csv` 中没有被误忽略的 connector/ray-lift 失败；
-4. connector 与孔边的实际距离满足刀具半径和工艺安全包络，不能只看 TCP 点不穿孔；
-5. base/world 安全点在当前工件位姿下无碰撞且可达；
+2. manual-v2 patch 的 `raster_chart`、`clip_polygon` 和 `exclude_polygons` 正确；同时用
+   一个没有 manifest 的原始 face-id split-scanline region 验证 projected cell 分支；
+3. `auto_planner_reason_counts` 与预期的内部孔、边界重叠和 split-scanline 一致；
+4. processing raster 没有进入孔或无表面区域；
+5. 每个 cell 的法向安全点与 cell 间 MoveJ 在当前工件位姿下无碰撞且可达；
 6. RobotStudio 中检查机器人本体、法兰、工具、工件和外围设备碰撞；
 7. 不得把二维 `valid` 或 pytest 通过解释为机器人级安全认证。
 

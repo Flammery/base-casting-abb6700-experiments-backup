@@ -168,18 +168,18 @@ while ordinary patches use the normal raster sampler. Forced `hole-aware` and
 - subtract holes before ordering motion;
 - decompose scanline runs into boustrophedon cells;
 - finish one cell/hole side before visiting another;
-- connect cells only through the valid 2D domain and ray-lift every connector;
-- add only one global start safe point and one global end safe point per patch.
+- preserve deterministic scan discovery order instead of greedy cell reordering;
+- retract along the endpoint normal and transfer above the surface between cells.
 
-The two safe points are offset in world/base coordinates by `(-100, 0, +100)`
-mm from the corresponding processing endpoint, then transformed to wobj.
-Processing and connector motion uses MoveL; only the initial safe target uses
-MoveJ.
+Each cell has one approach and one departure point at `SAFE_DISTANCE` along the
+local surface normal. Processing, approach, and departure use MoveL; transfer
+between lifted endpoints uses MoveJ.
 
 This planner does not establish collision freedom, robot reachability, IK
-continuity, tool-envelope clearance, or global shortest motion. It requires a
-manual-v2 `raster_chart` and `clip_polygon`; an invalid connector must defer the
-path instead of crossing a hole or silently falling back to legacy motion. See
+continuity, tool-envelope clearance, or global shortest motion. It accepts a
+complete manual-v2 chart/clip domain or a raw projected face-id raster; explicit
+exclude polygons still require their chart/clip. Processing motion must never
+cross a hole or silently fall back to legacy motion. See
 `HOLE_AWARE_PLANNER.md` for the complete contract.
 
 TCP orientation:

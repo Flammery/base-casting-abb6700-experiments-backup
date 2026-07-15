@@ -92,21 +92,21 @@ manifest 后作为 raster-domain clip 使用，不改变项目 schema。
 - 矩形始终在屏幕坐标中横平竖直，松开后再转换为 raster UV；
 - 多边形可靠近起点闭合，也可右键结束。
 
-点击“快速预览路径”会调用正式导出的同一 `plan_region_uv()`，只在内存中生成并
+点击“快速预览路径”会调用正式导出的同一 `plan_region_uv_auto()`，只在内存中生成并
 显示路径，不创建整批 Optimal-Y 输出。手动 v2 的颜色区域由二维 RGBA mask 作为
 texture 显示；STL 不会被切割或重建。
 
 ### “开始”的自动路径策略
 
-- 第一行“开始”使用默认 `auto` planner：先快速判断孔 polygon 是否与当前 patch 相交；
-  无孔 patch 使用普通 raster，有孔 patch 才进入 cell/绕孔规划。普通采样后若发现同一
-  scanline 被拆成多个 run，也会安全升级为 hole-aware；
-- `auto` 的两类路径都只保留每个 patch 的首尾安全位置；
+- 第一行“开始”使用默认 `auto` planner：内部孔和与边界有面积重叠的 exclude 进入
+  cell 规划；仅接触边界不算。普通采样后若同一 scanline 被拆成多个 run，也会升级；
+- hole-aware 完整加工每个 cell，并在 cell 之间法向抬刀转场；普通面保留快速 raster；
 - 新策略结果目录追加 `_hole_aware`，不会覆盖同日 legacy 输出；
-- “快速预览路径”目前仍是 legacy 预览，不能用它判断 hole-aware 的最终顺序。
+- “快速预览路径”使用同一自动判定，并在状态栏显示 cell 抬刀数量与触发原因。
 
-新策略要求 manual v2 patch 中同时存在 `raster_chart` 和 `clip_polygon`。完整限制、
-失败行为和 RobotStudio 验收要求见 `HOLE_AWARE_PLANNER.md`。
+新策略同时支持 manual-v2 patch 和未划分的原始 face-id region。manual-v2 的显式
+exclude 仍必须与 `raster_chart + clip_polygon` 成套存在；原始 region 在普通投影发现
+split-scanline 后直接复用投影扫描轴建立 cells。完整限制见 `HOLE_AWARE_PLANNER.md`。
 
 ## 常用命令
 
@@ -187,7 +187,7 @@ python experiments\base_casting_abb6700\scripts\runs\optimal_y_score_configurabl
   孔洞 interval，并沿 chart normal 射线投射到选中 STL，返回 XYZ 和三角面法向。
 
 - `experimental_algorithms/hole_aware_raster.py`
-  对 raster runs 做 cell 分解和同侧优先排序，必要时在有效二维域内规划绕孔 connector。
+  对 raster runs 做 cell 分解和稳定扫描排序；cell 内完整加工，cell 间由导出器抬刀转场。
   它已通过 `--planner hole-aware` 接入 runner，但仍是实验策略。
 
 - `scripts/optimal_y_selection.py`

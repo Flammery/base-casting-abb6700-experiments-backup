@@ -1,5 +1,12 @@
 # Auto 如何判断“带孔区域”：代码与教学说明
 
+> **版本说明（2026-07-15）**：自动判定仍保留“相关 exclude”与“同一扫描线多个 run”
+> 两级触发，但相关 exclude 现在明确为与 clip 有正面积重叠：完全位于 clip 内是真正内部孔，
+> 穿过边界也是相关排除区，仅边界接触不算。触发后采用 cell 内完整光栅、cell 间抬刀
+> 转场；本文后半部分关于 A*/connector 失败的内容是旧原型分析，仅供学习和历史对照。
+> 2026-07-15 后，未划分的原始 face-id region 也能直接用 projected runs 建立 cells，
+> 不再要求为了处理 split-scanline 先生成 manual-v2 manifest。
+
 本文只讲一个问题：
 
 > `auto` planner 到底怎样判断一个 patch 要不要进入 hole-aware？

@@ -325,6 +325,7 @@ def run_optimal_scan(
     coverage_rows: list[dict] = []
     auto_hole_aware_count = 0
     auto_raster_count = 0
+    auto_planner_reasons: dict[str, int] = {}
 
     for model_x, model_y, model_z in iter_poses(x_spec, y_spec, z_spec):
         pose_dir = candidates_dir / pose_label(model_x, model_y, model_z)
@@ -370,13 +371,7 @@ def run_optimal_scan(
 
                 inside_regions.append(region_index)
                 for variant_name, feed_variant in runner.FEED_VARIANTS:
-                    relevant_holes = runner.base.polygon_has_relevant_holes(
-                        planning_region.get("clip_polygon"),
-                        planning_region.get("exclude_polygons") or [],
-                    )
-                    use_hole_aware = args.planner == "hole-aware" or (args.planner == "auto" and relevant_holes)
-                    planner = runner.base.plan_region_uv_hole_aware if use_hole_aware else runner.base.plan_region_uv
-                    path = planner(
+                    planner_arguments = (
                         polydata,
                         placement,
                         settings,
@@ -386,19 +381,20 @@ def run_optimal_scan(
                         planning_region.get("exclude_polygons"),
                         planning_region.get("raster_chart"),
                     )
-                    if args.planner == "auto" and not use_hole_aware and runner.base.path_has_split_scanlines(path):
-                        use_hole_aware = True
-                        path = runner.base.plan_region_uv_hole_aware(
-                            polydata,
-                            placement,
-                            settings,
-                            planning_region["face_ids"],
-                            feed_variant,
-                            planning_region.get("clip_polygon"),
-                            planning_region.get("exclude_polygons"),
-                            planning_region.get("raster_chart"),
-                        )
                     if args.planner == "auto":
+                        path, use_hole_aware, planner_reason = runner.base.plan_region_uv_auto(*planner_arguments)
+                    elif args.planner == "hole-aware":
+                        use_hole_aware = True
+                        planner_reason = "forced-cell-transfer"
+                        path = runner.base.plan_region_uv_hole_aware(
+                            *planner_arguments
+                        )
+                    else:
+                        use_hole_aware = False
+                        planner_reason = "forced-regular-raster"
+                        path = runner.base.plan_region_uv(*planner_arguments)
+                    if args.planner == "auto":
+                        auto_planner_reasons[planner_reason] = auto_planner_reasons.get(planner_reason, 0) + 1
                         if use_hole_aware:
                             auto_hole_aware_count += 1
                         else:
@@ -412,9 +408,10 @@ def run_optimal_scan(
                             region_index,
                             variant_name,
                             planning_region["label"],
-                            hole_aware=args.planner != "legacy",
-                            planner_label=("auto-hole-aware" if use_hole_aware else "auto-raster") if args.planner == "auto" else args.planner,
+                            hole_aware=use_hole_aware,
+                            planner_label=("auto-cell-transfer" if use_hole_aware else "auto-raster") if args.planner == "auto" else args.planner,
                         )
+                        row["planner_reason"] = planner_reason
                         row["source_region"] = planning_region["source_region"]
                         candidate_rows.append(enrich_candidate_row(model_x, model_y, model_z, angle, row, path))
                     else:
@@ -428,6 +425,7 @@ def run_optimal_scan(
                                 "region": region_index,
                                 "region_label": planning_region["label"],
                                 "feed_variant": variant_name,
+                                "planner_reason": planner_reason,
                                 "reason": path.message,
                             }
                         )
@@ -468,6 +466,7 @@ def run_optimal_scan(
         "planner": args.planner,
         "auto_hole_aware_path_count": auto_hole_aware_count,
         "auto_raster_path_count": auto_raster_count,
+        "auto_planner_reason_counts": auto_planner_reasons,
         "experiment_mode": args.experiment_mode,
         "scan_axis": scan_axis,
         "model_x_values": x_spec.values,

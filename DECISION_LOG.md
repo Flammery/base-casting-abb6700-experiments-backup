@@ -44,8 +44,8 @@
 - 日期：2026-07-13
 - 状态：Accepted
 - 决定：从外轮廓 scanline intervals 中减去 `exclude_polygons`，射线未命中也必须断开 processing segment。
-- 约束：孔洞两侧不能用一条直线 processing motion 直接相连；hole-aware 只能通过
-  已验证位于有效域且能逐点 ray lift 的 connector 绕行。
+- 约束：孔洞两侧不能用一条直线 processing motion 直接相连；允许在端点法向退刀后，
+  通过离面运动转移到下一个 cell 的安全接近点。
 
 ## D007 manifest v1/v2 必须按版本解释
 
@@ -58,7 +58,7 @@
 
 - 日期：2026-07-13
 - 状态：Accepted
-- 决定：实验 UI 快速预览调用 `window_conf_export.plan_region_uv()`，不得维护另一套预览算法。
+- 决定：实验 UI 快速预览调用正式运行使用的 `window_conf_export.plan_region_uv_auto()`，不得维护另一套预览算法。
 
 ## D009 实验层与 src 的边界
 
@@ -80,7 +80,7 @@
 ## D011 Auto/Hole-aware UI 策略
 
 - 日期：2026-07-13
-- 状态：Accepted for experiment
+- 状态：Superseded by D013
 - 背景：legacy 按 raster segment 插入进退刀，导致扫描线边缘反复抬起；带孔扫描线
   按行处理还会在孔洞两侧频繁切换。
 - 决定：“开始”和 configurable runner 默认运行 `auto`：先快速判断与当前 patch 相关的
@@ -92,6 +92,25 @@
   快速预览仍为 legacy；新输出目录追加 `_hole_aware`；不得把二维避孔视为碰撞/IK认证。
 - 后续：真实 RobotStudio 验证完成后，另行决定是否保留强制 hole-aware 和 legacy CLI 回退。
 - 详细限制：见 `HOLE_AWARE_PLANNER.md`。
+
+## D013 Cell 内完整光栅、Cell 间抬刀转场
+
+- 日期：2026-07-15
+- 状态：Accepted for experiment
+- 背景：连续贴面 connector 把 Boustrophedon cell 图当成移动机器人覆盖问题；即使
+  `1→0→2` 在二维/表面上可连接，也不符合打磨中“一个区域完整走完后再离面转场”的工艺。
+- 决定：保留 run/cell 分解，但删除 cell 图贪心遍历、二维 A* 和 connector ray-lift。
+  cell 按原扫描发现顺序稳定排序，每个 cell 完整加工；cell 之间在终点法向退刀，离面
+  MoveJ 到下一起点的法向安全点，再 MoveL 接近。
+- 自动判定：hole 完全位于 clip 内或与 clip 有正面积边界重叠都算相关 exclude；仅边界
+  接触不算。同一扫描线多个 run 仍作为 STL 支撑缺口触发 cell 策略。
+- 输入兼容：manual-v2 使用 chart/clip 建立 runs；未划分的原始 face-id region 复用普通
+  mesh raster 的投影原点、U 轴和 split runs 建立相同 cells，不要求用户补做 manifest。
+- 约束与影响：离面转场可以在二维投影上越过 exclude，但这不代表砂轮、主轴、法兰和
+  机器人无碰撞；`SAFE_DISTANCE`、MoveJ 轨迹、可达性和构型必须在 RobotStudio 验证。
+- 相关代码/测试：`experimental_algorithms/hole_aware_raster.py`、
+  `scripts/window_conf_export.py`、`tests/test_hole_aware_raster.py`、
+  `tests/test_raster_segments.py`。
 
 ## D012 RobotStudio 独立验证工作站导出
 

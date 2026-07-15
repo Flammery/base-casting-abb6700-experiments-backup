@@ -128,6 +128,7 @@ class ExperimentPanel(QWidget):
         second_row.addWidget(self.window_limits)
         second_row.addWidget(QLabel("边缘余量"))
         second_row.addWidget(self.boundary_margin)
+        second_row.addWidget(QLabel("路径策略：自动判定；孔/缺口按 cell 完成后抬刀转场"))
         second_row.addStretch(1)
 
         layout.addLayout(first_row)
@@ -244,8 +245,10 @@ class ExperimentPanel(QWidget):
                 tool_name=project.polishing_tool.name,
             )
             paths = []
+            cell_transfer_count = 0
+            planner_reasons: dict[str, int] = {}
             for planning_region in planning_regions:
-                result = path_preview_backend.plan_region_uv(
+                result, use_cell_transfer, planner_reason = path_preview_backend.plan_region_uv_auto(
                     polydata,
                     placement,
                     settings,
@@ -257,12 +260,15 @@ class ExperimentPanel(QWidget):
                 )
                 if result.waypoints:
                     paths.append(result)
+                    cell_transfer_count += int(use_cell_transfer)
+                    planner_reasons[planner_reason] = planner_reasons.get(planner_reason, 0) + 1
             if not paths:
                 raise RuntimeError("当前设置没有生成可预览路径。")
             self.preview.show_paths(paths)
             total = sum(len(path.waypoints) for path in paths)
             self.status.setText(
-                f"快速预览完成: angle={self._preview_angle()}° | regions={len(paths)} | points={total}"
+                f"快速预览完成: angle={self._preview_angle()}° | regions={len(paths)} | points={total} | "
+                f"cell抬刀={cell_transfer_count} | 判定={planner_reasons}"
             )
         except Exception as exc:
             self.status.setText(f"快速预览失败: {exc}")
@@ -329,7 +335,7 @@ class ExperimentPanel(QWidget):
         return None
 
     def start_run(self) -> None:
-        self._start_run_with_planner("auto", "自动连续策略")
+        self._start_run_with_planner("auto", "自动光栅/cell抬刀策略")
 
     def _start_run_with_planner(self, planner: str, label: str) -> None:
         if self._process is not None:

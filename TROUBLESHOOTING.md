@@ -33,41 +33,36 @@
 
 ## CLI 强制 hole-aware 后全部进入 deferred
 
-- 检查输入是否为 manual manifest v2。
-- 检查目标 patch 是否同时具有 `raster_chart` 和 `clip_polygon`。
-- 检查孔洞是否写入 `exclude_polygons`。
-- 查看 `deferred_paths.csv` 的 `reason`：找不到 free-domain connector 或 connector
-  ray lift 失败时，新策略会拒绝导出，不会穿孔回退。
-- legacy face-id region 没有 raster chart 时，应先在当前 UI 中重新执行区域划分并应用。
+- 原始 face-id region 不再要求 manifest；检查是否确实生成了 projected raster samples。
+- manual-v2 输入若带 clip/exclude，检查 `raster_chart` 与 `clip_polygon` 是否成套存在。
+- 查看 `deferred_paths.csv`：当前主要失败条件是手动域元数据不完整或没有有效 sample；
+  旧版 free-domain connector 失败已不再适用。
 
 ## “开始”把无孔面也分到 hole-aware
 
-- `auto` 判断的是孔 polygon 是否与当前 patch 相交，不是仅检查
-  `exclude_polygons` 是否非空；先确认 clip/hole polygon 坐标都属于同一 raster chart。
+- `auto` 判断的是孔 polygon 是否与当前 patch 有正面积重叠，不是仅检查
+  `exclude_polygons` 是否非空；内部孔和穿过边界的 exclude 都会触发，仅边界接触不会。
 - 普通 raster 后如果同一 scanline 出现多个 segment，auto 也会主动升级，防止未记录
   孔洞造成直线跨越；查看实际 mesh/ray miss 是否形成了缺口。
 - `summary.json` 的两个 auto path count 按候选路径计数，不等于唯一面数。
 
-## “开始”完成但快速预览仍显示旧抬刀路径
+## 快速预览与正式 RAPID 的抬刀显示不同
 
-- 这是当前已知限制，不是 planner 参数失效。
-- “快速预览路径”仍调用 legacy `plan_region_uv()`；“开始”通过子进程调用 auto。
-- 强制 `--planner hole-aware` 只存在于 CLI，不会改变快速预览。
-- 请检查 `_hole_aware` 目录中的点 CSV 和 RAPID，或导入 RobotStudio 验证。
+- 快速预览与“开始”都调用 auto，但预览只绘制 processing raster，不绘制安全进退刀点。
+- 状态栏的 `cell抬刀` 和 `判定` 可确认是否进入 cell 策略。
+- 完整 MoveL/MoveJ 顺序仍需检查点 CSV、RAPID 或 RobotStudio。
 
-## 新路径不穿孔但离孔边太近
+## Cell 间抬刀路径可能靠近孔边或工件
 
-- 当前 connector 合法性检查以 TCP 点位于二维有效域为准，没有砂轮/刀盘扫掠体补偿。
+- 当前法向安全点和 MoveJ 转场没有砂轮/刀盘扫掠体补偿或三维碰撞验证。
 - `boundary_margin` 不是完整工具包络或碰撞模型。
 - 在 RobotStudio 按真实工具尺寸检查；需要更大余量时应增大分区/边缘余量，不能把
   二维不穿孔当成实际无碰撞。
 
-## 新路径在窄通道找不到绕行路线
+## 旧结果出现 `No free-domain connector between raster cells`
 
-- hole-aware connector 使用有限分辨率栅格 A*，大区域会限制节点数并增大网格步长。
-- 小于当前网格分辨率的通道可能被判定不可行。
-- 当前正确行为是 deferred；禁止为了出结果而恢复穿孔直线。
-- 若真实通道必须使用，应先单独改进 connector 分辨率/导航域并增加相应回归测试。
+- 这是 2026-07-15 之前连续贴面 A* 方案的结果，不是当前 cell 抬刀策略的失败条件。
+- 使用当前代码重新生成输出；不要直接混用旧候选目录和新 summary。
 
 ## Auto 和 CLI 强制 hole-aware 结果互相覆盖
 
