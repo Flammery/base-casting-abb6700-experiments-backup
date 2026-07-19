@@ -17,6 +17,9 @@ C:\Users\21093\Desktop\p1\.venv\Scripts\python.exe -m pytest tests -q
 - hole-aware 中央孔 cell 分解、稳定 cell 顺序和每个 cell 的进退刀点；
 - 输出目录日期和长度；
 - 项目输入优先级。
+- region/patch selector 规范化、自动/手动 patch 标签恢复和 local-Z roll 轴保持；
+- 通用碰撞默认使用配置的实际包络半径；避障算法试验 summary 必须明确记录
+  `thin-centerline-links`、5 mm 半径和 `use_configured_segment_radius=false`。
 
 ## 固定人工验收流程
 
@@ -37,6 +40,11 @@ C:\Users\21093\Desktop\p1\.venv\Scripts\python.exe -m pytest tests -q
 12. 手算法向安全位置：`safe = endpoint + normal × SAFE_DISTANCE`，并确认转换后的 wobj 坐标。
 13. 运行一次正式导出并记录 waypoint/cell/transfer/patch 数、planner reason 和 deferred 原因。
 14. 导入 RobotStudio，低速或单步检查可达性、构型连续、孔边间隙和实际碰撞。
+15. 分别输入 `1` 与 `1-1`，确认前者命中源 region 的全部 patches，后者只命中一个
+    patch；未输入的区域候选仍为 `avoidance_status=not-requested`。
+16. 检查 `robot_avoidance_trials.csv` 五个 roll 均有记录，`summary.json` 的 requested、
+    resolved labels、status counts 一致；`fallback-unverified` 不得显示为已安全。
+17. 对选中的替代姿态在 RobotStudio 检查完整路径、工具、环境、自碰撞和控制器构型。
 
 注意：快速预览与正式运行共用自动判定，但它只显示 processing raster，不显示完整的
 RAPID 抬刀/MoveJ 轨迹，因此不能代替 CSV/RAPID 和 RobotStudio 验收。

@@ -2,6 +2,7 @@ from pathlib import Path
 
 import importlib.util
 import json
+from types import SimpleNamespace
 
 
 def _load_script_module():
@@ -64,6 +65,33 @@ def test_safe_region_label_keeps_manual_partition_name() -> None:
     assert module.safe_region_label("13 2") == "13_2"
 
 
+def test_rapid_experiment_metadata_records_full_model_pose() -> None:
+    module = _load_script_module()
+    placement = SimpleNamespace(
+        model_x=3700.0,
+        model_y=-1200.0,
+        model_z=440.0,
+        model_rx=0.0,
+        model_ry=0.0,
+        model_rz=270.0,
+        name="wobj1",
+        file_path=r"C:\cad\part.stp",
+        picked_origin=(-2011.833, -2309.704, 549.128),
+        wobj_rx=0.0,
+        wobj_ry=0.0,
+    )
+
+    metadata = module.rapid_experiment_metadata(placement, "1_1")
+
+    assert metadata["schema"] == "robot_studio_qt.experiment_installation"
+    assert metadata["model_x"] == 3700.0
+    assert metadata["model_y"] == -1200.0
+    assert metadata["model_z"] == 440.0
+    assert metadata["model_rz"] == 270.0
+    assert metadata["picked_origin"] == [-2011.833, -2309.704, 549.128]
+    assert metadata["region_label"] == "1_1"
+
+
 def test_version_1_manifest_uses_materialized_project_regions(tmp_path) -> None:
     module = _load_script_module()
     project_path = tmp_path / "partitioned.rsp.json"
@@ -84,6 +112,31 @@ def test_version_1_manifest_uses_materialized_project_regions(tmp_path) -> None:
 
     assert [item["face_ids"] for item in regions] == [{1, 2}, {8, 9}]
     assert [item["label"] for item in regions] == ["1", "2"]
+
+
+def test_automatic_partition_manifest_restores_patch_labels_and_source_regions(tmp_path) -> None:
+    module = _load_script_module()
+    project_path = tmp_path / "partitioned.rsp.json"
+    project_path.write_text("{}", encoding="utf-8")
+    module.partition_manifest_path_for(project_path).write_text(
+        json.dumps(
+            {
+                "schema": "base_casting_abb6700.region_partition_manifest",
+                "version": 2,
+                "records": [
+                    {"original_region": 1, "patches": [{"label": "1.1"}, {"label": "1.2"}]},
+                    {"original_region": 2, "patches": [{"label": "2"}]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    planning = module.manual_clip_regions(project_path, [{1}, {2}, {3}])
+
+    assert [item["label"] for item in planning] == ["1.1", "1.2", "2"]
+    assert [item["source_region"] for item in planning] == [1, 1, 2]
+    module.validate_selectors(module.parse_region_selectors("1-2,2"), planning)
 
 
 def test_hole_gap_starts_a_new_motion_segment() -> None:

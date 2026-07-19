@@ -206,6 +206,21 @@ ConfL \Off;
 Tooldata should reflect the real flange-to-TCP geometry. Do not change tool TCP
 to compensate for an unwanted path orientation.
 
+## Selected Robot-Arm Avoidance Trials
+
+Robot-arm avoidance is opt-in by source region or patch label. It first creates
+the same auto-planned contact path as an ordinary region, then tests a small
+constant local TCP-Z roll library. Local Z roll preserves the contact point and
+tool axis, so it does not weaken `TCP +Z = -surface normal`.
+
+Only representative waypoints are screened with the project robot configuration,
+initial joint state, numerical IK, axis-configuration continuity, J5 margin,
+joint jumps, and an experiment-only 5 mm centerline-link model against the placed workpiece.
+Unselected planning regions must not enter this loop. No candidate result is a
+RobotStudio or real-cell safety certificate; tool, environment, self-collision,
+real robot-link envelopes, and swept motion remain outside this stage. Full rules are in
+`ROBOT_ARM_AVOIDANCE_WORKFLOW.md`.
+
 ## Y-Position Selection
 
 For dual-robot rail scans, first export feasible candidate paths with the

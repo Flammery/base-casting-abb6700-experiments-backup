@@ -142,3 +142,16 @@
 - commit 仍会成功创建，但不会自动属于某个本地分支。
 - 在清理或切换前记录 commit hash，并由用户决定 cherry-pick 或建立分支。
 - `inputs/latest_*` 和时间戳快照是实验数据，不应与代码修复一起提交。
+
+## 避障区域提示不存在
+
+- `1-1` 表示 patch，内部会规范为 `1_1`；`1` 表示源 region 并覆盖其全部 patches。
+- cell 没有可输入标签。查看错误中列出的当前 planning labels，并确认 `.rsp.json` 与同名
+  manifest 配套且未被移动或改名。
+
+## 避障结果是 `fallback-unverified`
+
+- 表示五个姿态都未通过内部代表点筛查。快速预览可显示原 base-y 供诊断；正式 runner
+  会将该位置 deferred，不生成 candidate/optimal 避障路线。
+- 查看 `robot_avoidance_trials.csv` 的 IK、collision、configuration、joint jump 和 J5 字段。
+- 当前不含工具/环境/自碰撞/扫掠体；即使显示 validated，也必须进入 RobotStudio 验证。

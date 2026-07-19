@@ -117,6 +117,7 @@ def default_output_dir(
     experiment_mode: str,
     date_suffix: str | None = None,
     planner: str = "legacy",
+    avoidance_enabled: bool = False,
 ) -> Path:
     mode_suffixes = {
         "rail": "rail",
@@ -125,6 +126,7 @@ def default_output_dir(
     mode_suffix = mode_suffixes.get(experiment_mode, experiment_mode)
     date_suffix = date_suffix or datetime.now().strftime("%m%d")
     planner_suffix = "_hole_aware" if planner == "hole-aware" else ""
+    avoidance_suffix = "_robot_avoid" if avoidance_enabled else ""
     return (
         runner.base.EXPERIMENT_DIR
         / "results"
@@ -132,7 +134,7 @@ def default_output_dir(
             f"{coord_label('x', x_spec)}_"
             f"{coord_label('y', y_spec)}_"
             f"{coord_label('z', z_spec)}_"
-            f"{mode_suffix}_{date_suffix}{planner_suffix}"
+            f"{mode_suffix}_{date_suffix}{planner_suffix}{avoidance_suffix}"
         )
     )
 
@@ -145,6 +147,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-z", default="440")
     parser.add_argument("--boundary-margin", type=float, default=runner.base.BOUNDARY_MARGIN)
     parser.add_argument("--planner", choices=["legacy", "auto", "hole-aware"], default="auto")
+    parser.add_argument(
+        "--avoidance-regions",
+        default="",
+        help="Comma-separated source regions or patches, e.g. 1,2 or 1-1,1-2.",
+    )
     parser.add_argument("--y-start", type=int, default=-1900, help="Compatibility fallback when --model-y is omitted.")
     parser.add_argument("--y-stop", type=int, default=1900, help="Compatibility fallback when --model-y is omitted.")
     parser.add_argument("--y-step", type=int, default=100, help="Compatibility fallback when --model-y is omitted.")
@@ -304,6 +311,15 @@ def run_optimal_scan(
     if not regions:
         raise RuntimeError(f"No selected_path_face_regions in {args.project}")
     planning_regions = runner.base.manual_clip_regions(args.project, regions)
+    avoidance_raw = str(getattr(args, "avoidance_regions", "") or "")
+    avoidance_selectors = runner.base.parse_region_selectors(avoidance_raw)
+    runner.base.validate_selectors(avoidance_selectors, planning_regions)
+    avoidance_selector_set = set(avoidance_selectors)
+    resolved_avoidance_labels = [
+        str(item["label"])
+        for item in planning_regions
+        if runner.base.selector_matches(avoidance_selector_set, item["label"], item["source_region"])
+    ]
     if project.polishing_tool.mass_kg <= 0.0:
         project.polishing_tool.mass_kg = runner.base.TOOL_LOAD_MASS_KG
 
@@ -326,6 +342,8 @@ def run_optimal_scan(
     auto_hole_aware_count = 0
     auto_raster_count = 0
     auto_planner_reasons: dict[str, int] = {}
+    avoidance_trial_rows: list[dict] = []
+    avoidance_status_counts: dict[str, int] = {}
 
     for model_x, model_y, model_z in iter_poses(x_spec, y_spec, z_spec):
         pose_dir = candidates_dir / pose_label(model_x, model_y, model_z)
@@ -364,6 +382,7 @@ def run_optimal_scan(
             )
             transform = runner.base.WorkpieceTransform(placement)
             inside_regions: list[int] = []
+            collision_mesh = None
 
             for region_index, planning_region in enumerate(planning_regions, 1):
                 if not runner.base.region_inside_window(vertices_by_region[region_index], transform):
@@ -393,12 +412,72 @@ def run_optimal_scan(
                         use_hole_aware = False
                         planner_reason = "forced-regular-raster"
                         path = runner.base.plan_region_uv(*planner_arguments)
+                    avoidance_selected = runner.base.selector_matches(
+                        avoidance_selector_set,
+                        planning_region["label"],
+                        planning_region["source_region"],
+                    ) if avoidance_selector_set else False
+                    avoidance_selection = None
+                    if path.waypoints and avoidance_selected:
+                        if collision_mesh is None:
+                            settings_for_collision = runner.base.CollisionSettings()
+                            collision_mesh = runner.base.CollisionMesh.from_polydata(
+                                polydata,
+                                placement,
+                                settings_for_collision.max_triangles,
+                            )
+                        avoidance_selection = runner.base.select_robot_pose(
+                            path,
+                            polydata,
+                            placement,
+                            project.robot_config,
+                            project.joint_state,
+                            project.polishing_tool,
+                            collision_mesh=collision_mesh,
+                        )
+                        path = avoidance_selection.path
+                        avoidance_status_counts[avoidance_selection.status] = avoidance_status_counts.get(avoidance_selection.status, 0) + 1
+                        for trial in avoidance_selection.trials:
+                            avoidance_trial_rows.append(
+                                {
+                                    "model_x": model_x,
+                                    "model_y": model_y,
+                                    "model_z": model_z,
+                                    "angle_deg": angle,
+                                    "region": region_index,
+                                    "source_region": planning_region["source_region"],
+                                    "region_label": planning_region["label"],
+                                    "feed_variant": variant_name,
+                                    "selection_status": avoidance_selection.status,
+                                    "selected_pose": avoidance_selection.selected_name,
+                                    **trial.as_dict(),
+                                }
+                            )
                     if args.planner == "auto":
                         auto_planner_reasons[planner_reason] = auto_planner_reasons.get(planner_reason, 0) + 1
                         if use_hole_aware:
                             auto_hole_aware_count += 1
                         else:
                             auto_raster_count += 1
+                    if avoidance_selection is not None and not avoidance_selection.validated:
+                        deferred_rows.append(
+                            {
+                                "model_x": model_x,
+                                "model_y": model_y,
+                                "model_z": model_z,
+                                "pose_label": f"{pose_label(model_x, model_y, model_z)}_rz{angle:03d}",
+                                "angle_deg": angle,
+                                "region": region_index,
+                                "source_region": planning_region["source_region"],
+                                "region_label": planning_region["label"],
+                                "feed_variant": variant_name,
+                                "planner_reason": planner_reason,
+                                "avoidance_selected": True,
+                                "avoidance_status": avoidance_selection.status,
+                                "reason": "No sampled-validated robot-arm avoidance pose; candidate export suppressed.",
+                            }
+                        )
+                        continue
                     if path.waypoints:
                         row = runner.base.export_path_variant(
                             project,
@@ -413,6 +492,10 @@ def run_optimal_scan(
                         )
                         row["planner_reason"] = planner_reason
                         row["source_region"] = planning_region["source_region"]
+                        row["avoidance_selected"] = avoidance_selected
+                        row["avoidance_status"] = avoidance_selection.status if avoidance_selection else "not-requested"
+                        row["avoidance_pose"] = avoidance_selection.selected_name if avoidance_selection else "base_y"
+                        row["avoidance_roll_degrees"] = avoidance_selection.selected_roll_degrees if avoidance_selection else 0.0
                         candidate_rows.append(enrich_candidate_row(model_x, model_y, model_z, angle, row, path))
                     else:
                         deferred_rows.append(
@@ -440,6 +523,7 @@ def run_optimal_scan(
     optimal_table = write_csv_safely(outdir / "optimal_selection.csv", best_table_rows)
     deferred_table = write_csv_safely(outdir / "deferred_paths.csv", deferred_rows)
     coverage_table = write_csv_safely(outdir / "coverage_by_pose.csv", coverage_rows)
+    avoidance_table = write_csv_safely(outdir / "robot_avoidance_trials.csv", avoidance_trial_rows)
     optimal_records_path = outdir / "optimal_records.json"
     optimal_records_path.write_text(
         json.dumps(
@@ -467,6 +551,21 @@ def run_optimal_scan(
         "auto_hole_aware_path_count": auto_hole_aware_count,
         "auto_raster_path_count": auto_raster_count,
         "auto_planner_reason_counts": auto_planner_reasons,
+        "avoidance_requested": avoidance_raw,
+        "avoidance_selectors": avoidance_selectors,
+        "avoidance_resolved_labels": resolved_avoidance_labels,
+        "avoidance_pose_roll_degrees": list(runner.base.POSE_ROLL_DEGREES),
+        "avoidance_collision_model": {
+            "kind": "thin-centerline-links",
+            "link_radius_mm": runner.base.EXPERIMENT_LINK_RADIUS_MM,
+            "clearance_mm": runner.base.EXPERIMENT_CLEARANCE_MM,
+            "use_configured_segment_radius": runner.base.EXPERIMENT_USE_SEGMENT_RADIUS,
+            "include_j6_to_tcp_segment": True,
+        },
+        "avoidance_status_counts": avoidance_status_counts,
+        "avoidance_trial_count": len(avoidance_trial_rows),
+        "avoidance_trial_table": str(avoidance_table),
+        "avoidance_scope": "sampled robot-arm IK/FK link-workpiece collision; tool geometry excluded",
         "experiment_mode": args.experiment_mode,
         "scan_axis": scan_axis,
         "model_x_values": x_spec.values,
@@ -525,6 +624,7 @@ def run_from_args(args: argparse.Namespace) -> Path:
         args.window_mode,
         args.experiment_mode,
         planner=args.planner,
+        avoidance_enabled=bool(str(getattr(args, "avoidance_regions", "") or "").strip()),
     )
     run_optimal_scan(args, x_spec, y_spec, z_spec, angles, bounds, outdir)
     return outdir

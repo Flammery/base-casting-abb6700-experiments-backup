@@ -101,6 +101,8 @@ RAPID 中：
 
 实验不会覆盖原始软件输入。批跑会在结果目录保存应用当前 X/Y/Z/RZ 后的 `.rsp.json` 快照，便于追溯该批 RAPID 使用的 placement 和 wobj。
 
+每个新生成的 RAPID 模块还在 `MODULE` 后写入一条 `RSP_EXPERIMENT_META_V1` 注释，保存完整模型安装位姿、region、CAD 路径、picked origin 和继承的 wobj RX/RY。Qt 主程序可在文件离开结果目录后恢复模型安装位置；该注释不替代 RAPID `wobjdata`，导入时仍必须用二者做一致性校验。
+
 ## 不可违反的检查项
 
 1. tool/wobj 名称来自输入项目。

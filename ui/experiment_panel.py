@@ -7,7 +7,6 @@ from pathlib import Path
 from PySide6.QtCore import QProcess, QTimer, Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -31,11 +30,13 @@ from experiment_config import (  # noqa: E402
     DEFAULT_INPUT,
     DEFAULT_PARTITIONED,
     DEFAULT_BOUNDARY_MARGIN,
+    DEFAULT_TURNTABLE_ANGLES,
     DEFAULT_X,
     DEFAULT_Y,
     DEFAULT_Z,
     ROOT,
     parse_region_text,
+    parse_turntable_angle_text,
     read_region_count,
     runner_command,
     validate_regions,
@@ -72,9 +73,13 @@ class ExperimentPanel(QWidget):
         self.partition_regions = QLineEdit("")
         self.partition_regions.setPlaceholderText("留空=当前唯一region")
         self.partition_regions.setFixedWidth(120)
-        self.partition_output = QLineEdit(str(DEFAULT_PARTITIONED))
-        self.partition_output.setMinimumWidth(330)
+        # Partition output remains a fixed experiment path; it is intentionally
+        # not exposed as the long editable path that previously occupied row 1.
+        self.partition_output_path = DEFAULT_PARTITIONED
         self.apply_partition_button = QPushButton("区域划分")
+        self.avoidance_regions = QLineEdit("")
+        self.avoidance_regions.setPlaceholderText("1-1,1-2 或 1,2,3")
+        self.avoidance_regions.setFixedWidth(170)
 
         self.window_limits = QLineEdit("1500,2500;-1050,1050")
         self.window_limits.setPlaceholderText("空=不限; 1000,2000;-1050,1050")
@@ -88,9 +93,9 @@ class ExperimentPanel(QWidget):
         self.robotstudio_timer = QTimer(self)
         self.robotstudio_timer.setInterval(1000)
 
-        self.angle_preset = QComboBox()
-        self.angle_preset.addItems(["地轨 0,180", "地轨 90,270", "转台 0..360 step10"])
-        self.angle_preset.setMinimumWidth(150)
+        self.turntable_angles = QLineEdit(DEFAULT_TURNTABLE_ANGLES)
+        self.turntable_angles.setPlaceholderText("270 或 0,180")
+        self.turntable_angles.setFixedWidth(125)
 
         self.model_x = self._coord_edit(DEFAULT_X)
         self.model_y = self._coord_edit(DEFAULT_Y)
@@ -110,14 +115,15 @@ class ExperimentPanel(QWidget):
         first_row.addWidget(self.region_count)
         first_row.addWidget(QLabel("分区"))
         first_row.addWidget(self.partition_regions)
-        first_row.addWidget(self.partition_output)
         first_row.addWidget(self.apply_partition_button)
-        first_row.addWidget(self.preview_path_button)
-        first_row.addWidget(self.start_button)
+        first_row.addWidget(QLabel("避障区域"))
+        first_row.addWidget(self.avoidance_regions)
+        first_row.addStretch(1)
 
         second_row = QHBoxLayout()
         second_row.setContentsMargins(0, 0, 0, 0)
-        second_row.addWidget(self.angle_preset)
+        second_row.addWidget(QLabel("转台"))
+        second_row.addWidget(self.turntable_angles)
         second_row.addWidget(QLabel("X"))
         second_row.addWidget(self.model_x)
         second_row.addWidget(QLabel("Y"))
@@ -128,7 +134,8 @@ class ExperimentPanel(QWidget):
         second_row.addWidget(self.window_limits)
         second_row.addWidget(QLabel("边缘余量"))
         second_row.addWidget(self.boundary_margin)
-        second_row.addWidget(QLabel("路径策略：自动判定；孔/缺口按 cell 完成后抬刀转场"))
+        second_row.addWidget(self.preview_path_button)
+        second_row.addWidget(self.start_button)
         second_row.addStretch(1)
 
         layout.addLayout(first_row)
@@ -149,7 +156,6 @@ class ExperimentPanel(QWidget):
         self.robotstudio_button.clicked.connect(self.export_to_robotstudio)
         self.robotstudio_timer.timeout.connect(self._poll_robotstudio_status)
         self.input_path.editingFinished.connect(self.refresh_region_count)
-        self.angle_preset.currentTextChanged.connect(self._sync_mode_defaults)
         self.refresh_region_count()
 
     def _coord_edit(self, text: str) -> QLineEdit:
@@ -193,18 +199,12 @@ class ExperimentPanel(QWidget):
         self.status.setText(f"当前输入: {path}")
         self.preview.load_project(path)
 
-    def _sync_mode_defaults(self, mode: str) -> None:
-        if mode == "转台 0..360 step10" and self.model_y.text().strip() in ("", DEFAULT_Y):
-            self.model_y.setText("0")
-        elif mode in ("地轨 0,180", "地轨 90,270") and self.model_y.text().strip() in ("", "0"):
-            self.model_y.setText(DEFAULT_Y)
-
     @staticmethod
     def _first_coordinate(text: str, fallback: str) -> float:
         return float((text.strip() or fallback).split(",", 1)[0].strip())
 
     def _preview_angle(self) -> int:
-        return 90 if "90,270" in self.angle_preset.currentText() else 0
+        return parse_turntable_angle_text(self.turntable_angles.text())[0]
 
     def preview_paths(self) -> None:
         """Use the production planner once and draw its model-coordinate result."""
@@ -218,6 +218,9 @@ class ExperimentPanel(QWidget):
             if not regions:
                 raise ValueError("当前项目没有已选择的加工面。")
             planning_regions = path_preview_backend.manual_clip_regions(project_path, regions)
+            avoidance_selectors = path_preview_backend.parse_region_selectors(self.avoidance_regions.text())
+            path_preview_backend.validate_selectors(avoidance_selectors, planning_regions)
+            avoidance_selector_set = set(avoidance_selectors)
             importer = path_preview_backend.CadImportService().import_model(project.workpiece.file_path)
             reader = path_preview_backend.create_mesh_reader(importer.display_path, importer.display_format)
             reader.SetFileName(str(importer.display_path))
@@ -247,6 +250,8 @@ class ExperimentPanel(QWidget):
             paths = []
             cell_transfer_count = 0
             planner_reasons: dict[str, int] = {}
+            avoidance_statuses: dict[str, int] = {}
+            collision_mesh = None
             for planning_region in planning_regions:
                 result, use_cell_transfer, planner_reason = path_preview_backend.plan_region_uv_auto(
                     polydata,
@@ -258,6 +263,30 @@ class ExperimentPanel(QWidget):
                     planning_region.get("exclude_polygons"),
                     planning_region.get("raster_chart"),
                 )
+                avoidance_selected = path_preview_backend.selector_matches(
+                    avoidance_selector_set,
+                    planning_region["label"],
+                    planning_region["source_region"],
+                ) if avoidance_selector_set else False
+                if result.waypoints and avoidance_selected:
+                    if collision_mesh is None:
+                        collision_settings = path_preview_backend.CollisionSettings(ignore_tcp_segment=False)
+                        collision_mesh = path_preview_backend.CollisionMesh.from_polydata(
+                            polydata,
+                            placement,
+                            collision_settings.max_triangles,
+                        )
+                    selection = path_preview_backend.select_robot_pose(
+                        result,
+                        polydata,
+                        placement,
+                        project.robot_config,
+                        project.joint_state,
+                        project.polishing_tool,
+                        collision_mesh=collision_mesh,
+                    )
+                    result = selection.path
+                    avoidance_statuses[selection.status] = avoidance_statuses.get(selection.status, 0) + 1
                 if result.waypoints:
                     paths.append(result)
                     cell_transfer_count += int(use_cell_transfer)
@@ -268,7 +297,7 @@ class ExperimentPanel(QWidget):
             total = sum(len(path.waypoints) for path in paths)
             self.status.setText(
                 f"快速预览完成: angle={self._preview_angle()}° | regions={len(paths)} | points={total} | "
-                f"cell抬刀={cell_transfer_count} | 判定={planner_reasons}"
+                f"cell抬刀={cell_transfer_count} | 判定={planner_reasons} | 避障={avoidance_statuses or '未启用'}"
             )
         except Exception as exc:
             self.status.setText(f"快速预览失败: {exc}")
@@ -280,7 +309,7 @@ class ExperimentPanel(QWidget):
             return
         try:
             input_path = Path(self.input_path.text())
-            output_path = Path(self.partition_output.text())
+            output_path = Path(self.partition_output_path)
             if not input_path.exists():
                 raise ValueError(f"输入文件不存在: {input_path}")
             raw_regions = self.partition_regions.text().strip()
@@ -351,10 +380,11 @@ class ExperimentPanel(QWidget):
                 self.model_x.text(),
                 self.model_y.text(),
                 self.model_z.text(),
-                self.angle_preset.currentText(),
+                self.turntable_angles.text(),
                 self.window_limits.text(),
                 self.boundary_margin.text(),
                 planner,
+                self.avoidance_regions.text(),
             )
         except Exception as exc:
             self.status.setText(f"实验参数错误: {exc}")
@@ -368,6 +398,8 @@ class ExperimentPanel(QWidget):
         self.apply_partition_button.setEnabled(False)
         self.preview_path_button.setEnabled(False)
         self.robotstudio_button.setEnabled(False)
+        self.avoidance_regions.setEnabled(False)
+        self.turntable_angles.setEnabled(False)
         self._runner_output = ""
         self._process_kind = kind
         self.status.setText(f"{label} 运行中...")
@@ -397,6 +429,8 @@ class ExperimentPanel(QWidget):
         self.apply_partition_button.setEnabled(True)
         self.preview_path_button.setEnabled(True)
         self.robotstudio_button.setEnabled(True)
+        self.avoidance_regions.setEnabled(True)
+        self.turntable_angles.setEnabled(True)
         if exit_code != 0:
             tail = "\n".join(self._runner_output.splitlines()[-8:])
             self.status.setText(f"运行失败，exit={exit_code}: {tail}")
@@ -404,7 +438,7 @@ class ExperimentPanel(QWidget):
             return
 
         if self._process_kind == "partition":
-            output_path = Path(self.partition_output.text())
+            output_path = Path(self.partition_output_path)
             self.input_path.setText(str(output_path))
             self.refresh_region_count()
             self.preview.load_project(output_path)

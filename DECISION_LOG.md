@@ -135,6 +135,39 @@
 - 验证边界：插件只准备场景和程序，不评价姿态、碰撞、可达性或路径质量。
 - 详细合同：见 `ROBOTSTUDIO_EXPORT.md`。
 
+## D014 指定 region/patch 的小型机械臂姿态库
+
+- 日期：2026-07-17
+- 状态：Accepted for experiment
+- 背景：少数加工区可能因机械臂腕部或杆段构型靠近工件，需要在不修改工具 TCP、接触点
+  和表面法向的前提下做局部姿态试验。
+- 决定：UI/CLI 只对用户指定的源 region 或 patch 测试整路径 TCP local-Z roll
+  `[0,+15,-15,+30,-30]`；未指定项继续原 auto/base-y 策略。裸 `N` 匹配源 region 及其
+  patches，`N-M/N_M/N.M` 精确匹配 patch，cell 不参与选择。
+- 筛查：最多 7 个代表点使用项目 ABB MDH、数值 IK、构型连续性、关节跳变、J5 余量和
+  机械臂—工件碰撞。当前算法试验将杆件简化为 5 mm 半径中心杆，不使用真实包络；
+  工具/环境/自碰撞/扫掠体不在范围内。
+- 回退：第一个通过的候选生效；全部失败则标记 `fallback-unverified`。快速预览可保留
+  base-y 供诊断，但正式 runner 必须 deferred，禁止生成 candidate/optimal 避障路线。
+- 日志：每个候选写 `robot_avoidance_trials.csv`，选择范围/状态写 `summary.json`。
+- 相关代码/测试：`scripts/region_selectors.py`、
+  `experimental_algorithms/robot_pose_avoidance.py`、configurable runner 和相关 pytest。
+
+## D015 RAPID 快速预览恢复实验安装位姿
+
+- 日期：2026-07-18
+- 状态：Accepted
+- 背景：Qt 主程序可导入实验 RAPID 检查路径，但若场景模型仍处于另一安装位姿，路径与工件不会重合。
+- 决定：新 RAPID 写入 `RSP_EXPERIMENT_META_V1` 注释；旧结果由 `optimal_records.json` 或
+  `optimal_selection.csv` 提供模型 X/Y/Z/RX/RY/RZ。Qt 导入器用 RAPID wobj 与输入项目
+  picked origin 校验元数据，只在当前 CAD/输入项目一致时更新共享 `model_transform`。
+- 被否决方案：从目录名猜位置；把 RAPID wobj 直接写成模型安装位置；导入时自动打开并覆盖整个项目。
+- 原因：目录名不是稳定数据合同，wobj 与场景模型安装是两套坐标职责，自动替换项目会覆盖用户当前状态。
+- 约束与影响：`workobject_transform` 和 RAPID 声明保持不变；校验失败仍允许只读路径预览，
+  但禁止自动移动模型。单独复制新 RAPID 文件时仍可依靠内嵌元数据复现位置。
+- 相关代码/测试：`scripts/window_conf_export.py`、`src/robot_studio_qt/path_planning/rapid_import.py`、
+  `tests/test_window_conf_export.py`、`src/tests/path_planning/test_rapid_import.py`。
+
 ## 新决策模板
 
 ```text

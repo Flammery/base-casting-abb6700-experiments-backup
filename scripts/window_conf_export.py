@@ -46,11 +46,20 @@ from robot_studio_qt.path_planning.models import (
 from robot_studio_qt.path_planning.transforms import WorkpieceTransform
 from robot_studio_qt.polishing_tool import tool_to_rapid
 from robot_studio_qt.project import load_project_file, save_project_file
+from robot_studio_qt.tools.reachability.collision import CollisionMesh, CollisionSettings
 from raster_domain import point_to_uv, raster_samples
 from hole_aware_raster import (  # noqa: F401 - runner API
     hole_aware_raster_samples,
     polygon_has_relevant_holes,
     projected_raster_cell_samples,
+)
+from region_selectors import parse_region_selectors, selector_matches, validate_selectors  # noqa: F401 - shared UI/runner API
+from robot_pose_avoidance import (  # noqa: F401 - experimental runner API
+    EXPERIMENT_CLEARANCE_MM,
+    EXPERIMENT_LINK_RADIUS_MM,
+    EXPERIMENT_USE_SEGMENT_RADIUS,
+    POSE_ROLL_DEGREES,
+    select_robot_pose,
 )
 
 
@@ -151,6 +160,33 @@ def manual_clip_regions(project_path: Path, regions: list[set[int]]) -> list[dic
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception:
         manifest = {}
+    # Automatic preprocessing materializes patches as sequential face-id regions.
+    # Restore its human labels/source region here so selectors such as ``1-1``
+    # work for both automatic patches and manual-v2 raster patches.
+    if (
+        manifest.get("schema") == "base_casting_abb6700.region_partition_manifest"
+        and int(manifest.get("version", 0)) == 2
+    ):
+        flattened: list[dict] = []
+        for record in manifest.get("records", []):
+            source_region = int(record.get("original_region", 0))
+            patches = list(record.get("patches") or [])
+            if not patches:
+                patches = [{"label": str(source_region)}]
+            for patch in patches:
+                flattened.append({"source_region": source_region, "label": str(patch.get("label") or source_region)})
+        if len(flattened) == len(regions):
+            return [
+                {
+                    "source_region": flattened[index]["source_region"],
+                    "label": flattened[index]["label"],
+                    "face_ids": region,
+                    "clip_polygon": None,
+                    "exclude_polygons": [],
+                    "raster_chart": None,
+                }
+                for index, region in enumerate(regions)
+            ]
     # Version 1 materialized partitions directly into selected_path_face_regions.
     # It shares the historical schema name with the version-2 UV clip manifest,
     # so treating v1 records as clip polygons duplicates region 1 and corrupts
@@ -385,13 +421,35 @@ def base_y_aligned_quaternion(normal_world: tuple[float, float, float], previous
     return quaternion.normalized()
 
 
-def rapid_text(module_name: str, placement, tool, path, motion_waypoints) -> str:
+def rapid_experiment_metadata(placement, region_label: str) -> dict:
+    """Return self-contained scene-placement metadata for one RAPID module."""
+    return {
+        "schema": "robot_studio_qt.experiment_installation",
+        "version": 1,
+        "model_x": placement.model_x,
+        "model_y": placement.model_y,
+        "model_z": placement.model_z,
+        "model_rx": placement.model_rx,
+        "model_ry": placement.model_ry,
+        "model_rz": placement.model_rz,
+        "region_label": region_label,
+        "workpiece_name": placement.name,
+        "workpiece_file_path": placement.file_path,
+        "picked_origin": list(placement.picked_origin),
+        "wobj_rx": placement.wobj_rx,
+        "wobj_ry": placement.wobj_ry,
+    }
+
+
+def rapid_text(module_name: str, placement, tool, path, motion_waypoints, region_label: str = "") -> str:
     # RAPID robtarget 的位置和姿态都写在 wobj 坐标系下；世界姿态要先转换到 wobj 相对姿态。
     ext_axes = "9E9,9E9,9E9,9E9,9E9,9E9"
     q_wobj = euler_xyz_degrees_to_quaternion(placement.wobj_rx, placement.wobj_ry, placement.wobj_rz)
     q_world_to_wobj = q_wobj.conjugated()
+    experiment_metadata = rapid_experiment_metadata(placement, region_label)
     lines = [
         f"MODULE {module_name}",
+        f"    ! RSP_EXPERIMENT_META_V1 {json.dumps(experiment_metadata, ensure_ascii=False, separators=(',', ':'))}",
         f"    {tool_to_rapid(tool)}",
         (
             f"    PERS wobjdata {path.workobject_name}:=[FALSE,TRUE,\"\","
@@ -882,7 +940,7 @@ def export_path_variant(
     folder.mkdir(parents=True, exist_ok=True)
     module_name = rapid_module_name(region_index)
     file_stem = label
-    rapid = rapid_text(module_name, placement, project.polishing_tool, path, motion)
+    rapid = rapid_text(module_name, placement, project.polishing_tool, path, motion, label)
     txt_path = folder / f"{file_stem}.txt"
     txt_path.write_text(rapid, encoding="utf-8")
     row = {

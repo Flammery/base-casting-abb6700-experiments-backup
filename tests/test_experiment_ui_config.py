@@ -40,6 +40,22 @@ def test_parse_region_text_allows_empty() -> None:
     assert module.parse_region_text("") == []
 
 
+def test_parse_avoidance_regions_supports_regions_and_patch_spellings() -> None:
+    module = _load_ui_config_module()
+
+    assert module.parse_region_selectors("1-1, 1_2, 2.3, 4, 1-1") == ["1_1", "1_2", "2_3", "4"]
+    assert module.parse_region_selectors("") == []
+
+
+def test_parse_avoidance_regions_rejects_invalid_or_zero_labels() -> None:
+    module = _load_ui_config_module()
+
+    with pytest.raises(ValueError, match="无效避障区域"):
+        module.parse_region_selectors("1-a")
+    with pytest.raises(ValueError, match="正整数"):
+        module.parse_region_selectors("0,1-0")
+
+
 def test_validate_regions_rejects_out_of_range() -> None:
     module = _load_ui_config_module()
 
@@ -47,17 +63,17 @@ def test_validate_regions_rejects_out_of_range() -> None:
         module.validate_regions([2, 20], 19)
 
 
-def test_angle_preset_arguments() -> None:
+def test_turntable_angle_arguments_accept_single_and_multiple_angles() -> None:
     module = _load_ui_config_module()
 
-    assert module.angle_args("地轨 0,180") == ["--experiment-mode", "rail", "--angles", "0,180"]
-    assert module.angle_args("地轨 90,270") == ["--experiment-mode", "rail", "--angles", "90,270"]
-    assert module.angle_args("转台 0..360 step10") == [
-        "--experiment-mode",
-        "turntable",
-        "--angles-range",
-        "0,360,10",
+    assert module.parse_turntable_angle_text("270") == [270]
+    assert module.parse_turntable_angle_text("0,180") == [0, 180]
+    assert module.parse_turntable_angle_text("360,-30,330") == [0, 330]
+    assert module.turntable_angle_args("0,30,180") == [
+        "--experiment-mode", "turntable", "--angles", "0,30,180"
     ]
+    with pytest.raises(ValueError, match="转台角度"):
+        module.parse_turntable_angle_text("0,abc")
 
 
 def test_parse_coordinate_text_fixed_and_range() -> None:
@@ -86,7 +102,7 @@ def test_runner_command_uses_equals_for_negative_coordinate_range(tmp_path) -> N
         "3500",
         "-1900,100,1900",
         "440",
-        "地轨 0,180",
+        "0,180",
         "1400,2600;-1050,1050",
         "6",
     )
@@ -104,7 +120,7 @@ def test_runner_command_adds_hole_aware_planner_only_when_requested(tmp_path) ->
         "3500",
         "0",
         "440",
-        "地轨 0,180",
+        "0,180",
         "1500,2500;-1050,1050",
         "6",
     )
@@ -118,6 +134,26 @@ def test_runner_command_adds_hole_aware_planner_only_when_requested(tmp_path) ->
 
     automatic = module.runner_command(*common, planner="auto")
     assert automatic[automatic.index("--planner") + 1] == "auto"
+
+
+def test_runner_command_adds_normalized_avoidance_regions_only_when_requested(tmp_path) -> None:
+    module = _load_ui_config_module()
+    common = (
+        "python",
+        tmp_path / "input.rsp.json",
+        "3500",
+        "0",
+        "440",
+        "0,180",
+        "1500,2500;-1050,1050",
+        "6",
+    )
+
+    ordinary = module.runner_command(*common, planner="auto")
+    avoidance = module.runner_command(*common, planner="auto", avoidance_regions="1-1,2")
+
+    assert "--avoidance-regions" not in ordinary
+    assert avoidance[avoidance.index("--avoidance-regions") + 1] == "1_1,2"
 
 
 def test_configurable_runner_defaults_to_auto_planner() -> None:

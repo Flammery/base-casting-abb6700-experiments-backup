@@ -65,7 +65,9 @@ patch.
   Core phase-1 window/conf exporter. It reads selected regions, scans workpiece
   poses and turntable angles, filters each region by the base machining window,
   generates boundary-UV raster paths, and exports per-region ABB RAPID modules,
-  point CSVs, and summary tables.
+  point CSVs, and summary tables. Each new RAPID module carries a
+  `RSP_EXPERIMENT_META_V1` comment so the Qt importer can restore and verify the
+  scene model placement without confusing it with wobjdata.
 
 - `scripts/raster_domain.py`
   Experiment-owned manual-v2 planner. It builds the 2D chart domain, derives
@@ -84,6 +86,14 @@ patch.
   Lightweight selector for dual-robot rail experiments. It chooses one candidate
   per region by `max(abs(world_y))` over processing waypoints only. Do not add
   per-waypoint IK optimization here.
+
+- `scripts/region_selectors.py` and `experimental_algorithms/robot_pose_avoidance.py`
+  Resolve plain regions and partition labels, then screen a five-entry local
+  TCP-Z roll library for explicitly requested planning regions only. The
+  experiment reuses src IK/FK and arm-link/workpiece collision, currently with
+  an explicit 5 mm centerline-link model instead of configured envelopes. It
+  excludes tool/environment/self/swept-volume collision. See
+  `ROBOT_ARM_AVOIDANCE_WORKFLOW.md` before changing this flow.
 
 - `scripts/robotstudio_package.py`
   Packages selected Optimal-Y RAPID into one job per region/patch. It separates
@@ -120,6 +130,12 @@ patch.
 - Use `base_y_aligned` TCP orientation.
 - Use fixed confdata by base Y and emit `ConfL \Off;`.
 - Do not make full per-waypoint IK the main batch loop.
+- Avoidance selector `N` means source region N (including its patches), while
+  `N-M`/`N_M`/`N.M` means one patch. Never interpret a selector as a hole-aware
+  cell. Unselected planning regions must retain the former auto/base-y path.
+- Pose-library success is sampled internal screening, not a safety certificate.
+  Keep `fallback-unverified` explicit, suppress its formal candidate/optimal
+  export, and preserve per-candidate CSV/summary/deferred logs.
 - Risky or exploratory algorithms should start in `experimental_algorithms/`
   unless they are already part of this experiment's reusable script layer.
 - Hole-aware accepts either a complete manual-v2 `raster_chart + clip_polygon`

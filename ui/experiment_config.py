@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 
 EXPERIMENT_DIR = Path(__file__).resolve().parents[1]
 ROOT = EXPERIMENT_DIR.parents[1]
@@ -9,11 +10,17 @@ DEFAULT_INPUT = EXPERIMENT_DIR / "inputs" / "latest_script_test.rsp.json"
 DEFAULT_PARTITIONED = EXPERIMENT_DIR / "inputs" / "latest_partitioned.rsp.json"
 PARTITION_SCRIPT = EXPERIMENT_DIR / "scripts" / "region_partition_preprocess.py"
 RUNNER_SCRIPT = EXPERIMENT_DIR / "scripts" / "runs" / "optimal_y_score_configurable.py"
+SCRIPT_DIR = EXPERIMENT_DIR / "scripts"
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from region_selectors import parse_region_selectors
 
 DEFAULT_X = "3700"
 DEFAULT_Y = "-1900,100,1900"
 DEFAULT_Z = "440"
 DEFAULT_BOUNDARY_MARGIN = "6"
+DEFAULT_TURNTABLE_ANGLES = "270"
 
 
 def parse_region_text(raw: str) -> list[int]:
@@ -81,14 +88,29 @@ def scan_axis_for_coordinates(x_text: str, y_text: str, z_text: str) -> str:
     return ranged[0] if ranged else "none"
 
 
-def angle_args(preset: str) -> list[str]:
-    if preset == "地轨 0,180":
-        return ["--experiment-mode", "rail", "--angles", "0,180"]
-    if preset == "地轨 90,270":
-        return ["--experiment-mode", "rail", "--angles", "90,270"]
-    if preset == "转台 0..360 step10":
-        return ["--experiment-mode", "turntable", "--angles-range", "0,360,10"]
-    raise ValueError(f"未知旋转预设: {preset}")
+def parse_turntable_angle_text(raw: str, default: str = DEFAULT_TURNTABLE_ANGLES) -> list[int]:
+    text = default if not raw.strip() else raw.strip()
+    values: list[int] = []
+    seen: set[int] = set()
+    for item in text.split(","):
+        token = item.strip()
+        if not token:
+            continue
+        try:
+            value = int(token) % 360
+        except ValueError as exc:
+            raise ValueError("转台角度应为逗号分隔的整数，例如 270 或 0,180") from exc
+        if value not in seen:
+            seen.add(value)
+            values.append(value)
+    if not values:
+        raise ValueError("至少填写一个转台角度，例如 270 或 0,180")
+    return values
+
+
+def turntable_angle_args(raw: str) -> list[str]:
+    values = parse_turntable_angle_text(raw)
+    return ["--experiment-mode", "turntable", "--angles", ",".join(str(value) for value in values)]
 
 
 def parse_custom_window_text(raw: str) -> dict[str, tuple[float, float] | None]:
@@ -161,10 +183,11 @@ def runner_command(
     model_x: str,
     model_y: str,
     model_z: str,
-    angle_preset: str,
+    turntable_angles: str,
     window_text: str,
     boundary_margin_text: str = DEFAULT_BOUNDARY_MARGIN,
     planner: str = "legacy",
+    avoidance_regions: str = "",
 ) -> list[str]:
     scan_axis_for_coordinates(model_x, model_y, model_z)
     boundary_margin = parse_boundary_margin_text(boundary_margin_text)
@@ -177,12 +200,15 @@ def runner_command(
         f"--model-y={model_y.strip() or DEFAULT_Y}",
         f"--model-z={model_z.strip() or DEFAULT_Z}",
         f"--boundary-margin={boundary_margin:g}",
-        *angle_args(angle_preset),
+        *turntable_angle_args(turntable_angles),
     ]
     if planner not in {"legacy", "auto", "hole-aware"}:
         raise ValueError(f"未知路径策略: {planner}")
     if planner != "legacy":
         command.extend(["--planner", planner])
+    avoidance_selectors = parse_region_selectors(avoidance_regions)
+    if avoidance_selectors:
+        command.extend(["--avoidance-regions", ",".join(avoidance_selectors)])
     limits = parse_custom_window_text(window_text)
     if all(limit is None for limit in limits.values()):
         command.extend(["--window-mode", "unlimited"])

@@ -10,7 +10,8 @@ Optimal-Y 完成后，可在实验 UI 点击“导入 RobotStudio 验证”，�
 
 设计决策见 `DECISION_LOG.md`，manifest 字段见 `MANIFEST_SCHEMA.md`，已知故障见
 `TROUBLESHOOTING.md`，坐标同步见 `COORDINATE_SYSTEMS.md`，提交前验收见
-`VALIDATION.md`。带孔连续路径的行为和限制见 `HOLE_AWARE_PLANNER.md`。
+`VALIDATION.md`。带孔连续路径的行为和限制见 `HOLE_AWARE_PLANNER.md`。指定
+region/patch 的机械臂替代姿态试验见 `ROBOT_ARM_AVOIDANCE_WORKFLOW.md`。
 
 ## 中文说明
 
@@ -108,6 +109,22 @@ texture 显示；STL 不会被切割或重建。
 exclude 仍必须与 `raster_chart + clip_polygon` 成套存在；原始 region 在普通投影发现
 split-scanline 后直接复用投影扫描轴建立 cells。完整限制见 `HOLE_AWARE_PLANNER.md`。
 
+### 指定区域的机械臂避障姿态试验
+
+第一行“避障区域”可填 `1-1,1-2`（指定 patch）或 `1,2,3`（指定源 region）。裸
+region 会覆盖其派生 patch；空输入表示全部区域保持原策略。只有命中的区域会测试
+`0,+15,-15,+30,-30` 度 TCP local-Z roll 小库，未命中区域仍走原有 auto planner 和
+`base_y` 姿态。正式运行也可传 `--avoidance-regions 1-1,1-2`。
+
+该试验使用内部 ABB 数值 IK、构型/J5/关节跳变和机械臂连杆—工件碰撞粗筛；工具与
+环境未建模。当前杆件故意简化为 5 mm 半径中心杆，不代表真实安全包络。结果记录在
+`robot_avoidance_trials.csv` 和 `summary.json`，详细边界、
+回退规则与 RobotStudio 验收流程见 `ROBOT_ARM_AVOIDANCE_WORKFLOW.md`。
+
+转台角度不再使用固定预设。实验 UI 的“转台”输入框可填写单个角度 `270`，也可填写
+多个角度 `0,180` 或 `0,30,180`；逗号分隔、按输入顺序运行，负角度和 360 会规范到
+`0..359`。
+
 ## 常用命令
 
 查看分区结果但不写文件：
@@ -165,7 +182,7 @@ python experiments\base_casting_abb6700\scripts\runs\optimal_y_score_configurabl
 
 - `experimental_algorithms/`
   更激进或尚未稳定的算法原型；当前包含 auto 按需调用的
-  `hole_aware_raster.py`。
+  `hole_aware_raster.py`，以及只对指定区域调用的 `robot_pose_avoidance.py`。
 
 ## 脚本说明
 
