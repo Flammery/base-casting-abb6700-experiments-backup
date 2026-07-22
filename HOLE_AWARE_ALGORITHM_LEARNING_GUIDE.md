@@ -1109,7 +1109,7 @@ flowchart TD
 文件：
 
 ```text
-scripts/runs/optimal_y_score_configurable.py
+scripts/optimal_y_score_configurable.py
 ```
 
 重点：

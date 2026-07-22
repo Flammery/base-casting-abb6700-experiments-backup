@@ -34,7 +34,7 @@
 文件：
 
 ```text
-scripts/runs/optimal_y_score_configurable.py
+scripts/optimal_y_score_configurable.py
 ```
 
 关键代码位于 `run_optimal_scan()` 中，大致是第 373～400 行：
@@ -713,7 +713,7 @@ path_has_split_scanlines()
 ### 10.5 Auto 总编排
 
 ```text
-scripts/runs/optimal_y_score_configurable.py
+scripts/optimal_y_score_configurable.py
 ```
 
 阅读 `run_optimal_scan()` 中：

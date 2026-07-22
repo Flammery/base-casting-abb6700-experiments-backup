@@ -4,6 +4,23 @@ This is the project-specific offline workspace for the large base-casting
 polishing study. For agent handoff rules, read `AGENTS.md`. For algorithm
 principles, read `PRINCIPLES.md`.
 
+## Current avoidance and result behavior (2026-07-22)
+
+- Turntable input accepts arbitrary comma-separated angles; each value is used
+  as the actual model/workobject RZ.
+- Only user-selected avoidance regions run the experimental sampled IK/FK and
+  robot-link/workpiece collision screen. Ordinary regions remain on the normal
+  export path and are validated by ABB/RobotStudio.
+- Avoidance IK continuity is selected by seeding each point from the previous
+  successful joint solution and checking the real joint-angle jump. Confdata
+  quadrant changes are diagnostic and are not a rejection condition.
+- `all_candidates.csv` contains only generated non-empty paths. Unresolved
+  avoidance paths remain available for diagnosis but do not enter
+  `optimal_paths`; the compact `robot_avoidance_trials.csv` states the selected
+  roll, sampled interference result, clearance, joint jump, and reason.
+- After a successful UI run, the generated result directory opens
+  automatically. A folder-open failure does not change the calculation result.
+
 Optimal-Y 完成后，可在实验 UI 点击“导入 RobotStudio 验证”，选择该次实验结果目录，
 按 region/patch 生成 RobotStudio 6.08 人工验证工作站。安装、目录选择、命名规则、操作流程和
 安全边界见 `ROBOTSTUDIO_EXPORT.md`；生成工作站不等于碰撞、可达性或姿态验证通过。
@@ -109,17 +126,15 @@ texture 显示；STL 不会被切割或重建。
 exclude 仍必须与 `raster_chart + clip_polygon` 成套存在；原始 region 在普通投影发现
 split-scanline 后直接复用投影扫描轴建立 cells。完整限制见 `HOLE_AWARE_PLANNER.md`。
 
-### 指定区域的机械臂避障姿态试验
+### 指定区域的 ABB/RobotStudio 验证标记
 
 第一行“避障区域”可填 `1-1,1-2`（指定 patch）或 `1,2,3`（指定源 region）。裸
-region 会覆盖其派生 patch；空输入表示全部区域保持原策略。只有命中的区域会测试
-`0,+15,-15,+30,-30` 度 TCP local-Z roll 小库，未命中区域仍走原有 auto planner 和
-`base_y` 姿态。正式运行也可传 `--avoidance-regions 1-1,1-2`。
+region 会覆盖其派生 patch；空输入表示不添加验证标记。当前阶段不运行实验数值 IK/FK，
+也不会因为内部 IK 不收敛而删除有效路径。命中的路径保持 `base_y` 和工具 local-Z roll
+`0°`，IK、构型和真实干涉统一交给 ABB/RobotStudio 验证。
 
-该试验使用内部 ABB 数值 IK、构型/J5/关节跳变和机械臂连杆—工件碰撞粗筛；工具与
-环境未建模。当前杆件故意简化为 5 mm 半径中心杆，不代表真实安全包络。结果记录在
-`robot_avoidance_trials.csv` 和 `summary.json`，详细边界、
-回退规则与 RobotStudio 验收流程见 `ROBOT_ARM_AVOIDANCE_WORKFLOW.md`。
+`robot_avoidance_trials.csv` 只保留安装 X/Y/Z、转台角度、region、工具转角和干涉状态；
+未经过 ABB/RobotStudio 验证时，干涉状态必须明确写为“未评估”。
 
 转台角度不再使用固定预设。实验 UI 的“转台”输入框可填写单个角度 `270`，也可填写
 多个角度 `0,180` 或 `0,30,180`；逗号分隔、按输入顺序运行，负角度和 360 会规范到
@@ -160,7 +175,7 @@ python experiments\base_casting_abb6700\scripts\runs\optimal_y_score_x3500_z440.
 从命令行强制所有 patch 使用 hole-aware（仅用于排障/对照）：
 
 ```powershell
-python experiments\base_casting_abb6700\scripts\runs\optimal_y_score_configurable.py --project experiments\base_casting_abb6700\inputs\latest_partitioned.rsp.json --planner hole-aware --model-x=3700 --model-y=-1900,100,1900 --model-z=440 --angles 0,180
+python experiments\base_casting_abb6700\scripts\optimal_y_score_configurable.py --project experiments\base_casting_abb6700\inputs\latest_partitioned.rsp.json --planner hole-aware --model-x=3700 --model-y=-1900,100,1900 --model-z=440 --angles 0,180
 ```
 
 ## 目录职责

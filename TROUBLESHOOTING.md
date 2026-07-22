@@ -1,5 +1,54 @@
 # Troubleshooting
 
+> 2026-07-22 以下新增条目覆盖文档后部旧的 `fallback-unverified -> deferred`
+> 说明：当前非空诊断路径保留为候选，但仍不进入避障最优结果。
+
+## 避障报告显示 IK unresolved，但姿态和位置看起来可加工
+
+- 先看 `robot_avoidance_trials.csv` 的 `status`、`max_joint_jump_deg` 和
+  `reason`，不要把 `ik-unresolved` 直接解释成 ABB 不可达或发生干涉。
+- 当前避障层不再锁定 J1/J4/J6 的 confdata 分区；J6 从正小角度连续跨到
+  负小角度不会仅因配置编号变化而失败。
+- 若仍为 `ik-unresolved`，表示当前数值求解器、seed 和最多 7 个代表点的
+  筛查没有得到完整结果。路径仍保留在 `all_candidates.csv` 供
+  RobotStudio 复核，但不会进入 `optimal_paths`。
+- `joint-discontinuous` 表示求得了解与上一成功点的实际最大关节差超过
+  40°；这与 confdata 编号变化不同。
+- `validated-interference` 表示已求得 IK 且抽样 FK 连杆检测到工件碰撞；
+  `clearance-insufficient` 表示未碰撞但抽样最小间隙低于要求。
+- 所有状态都只是抽样实验结果；完整 MoveL/MoveJ、工具、环境、自碰撞和
+  ABB 控制器构型仍需在 RobotStudio 验证。
+
+## 避障候选存在，但 optimal_paths 没有对应区域
+
+- 这是预期的安全分层：非空几何路径会写入候选，方便定位和外部验证；
+  只有 `baseline-validated` 或 `alternative-validated` 才能参与避障最优选择。
+- 查看 `robot_avoidance_trials.csv` 和 `summary.json.avoidance_status_counts`
+  判断是 IK 未解析、关节不连续、间隙不足还是检测到干涉。
+- 普通区域不受这个过滤影响，仍按 processing waypoint 的
+  `max(abs(world_y))` 选择。
+
+## 导入实验 RAPID 后工件坐标系没有跟随模型
+
+- 自动同步只在实验安装元数据、当前输入/CAD身份以及 RAPID wobj 校验
+  全部通过后执行；先查看程序导入日志中的校验信息。
+- 同步结果应满足：模型使用实验 X/Y/Z/RZ，wobj XYZ 使用旋转后的
+  `picked_origin`，wobj RX/RY 保留输入项目标定值，wobj RZ 使用实验角度。
+- 如果只移动模型而 W 坐标系不动，确认主程序调用的是
+  `apply_verified_experiment_installation()`，不要重新加入只写
+  `model_transform` 的旧逻辑。
+- 未通过校验时禁止为了显示对齐而强制移动 W 坐标系；应先修复输入项目、
+  picked origin 或 RAPID wobj 不一致。
+
+## 计算成功但结果文件夹没有自动打开
+
+- 自动打开只发生在进程 exit code 为 0、成功定位 `summary.json` 且
+  `output_dir`/summary 所在目录实际存在时。
+- 失败只影响 Explorer 启动，UI 状态会追加“结果文件夹未能自动打开”，
+  不会把已完成的实验改成失败。
+- 检查 Windows 文件关联、目录权限以及安全软件是否阻止 Explorer；结果
+  仍可从状态栏显示的 `output=` 路径手动打开。
+
 ## 快速预览提示 `plan_region_uv()` 参数数量不匹配
 
 - 原因：运行中的 Python/Qt 进程缓存了旧模块，但 UI 已加载新调用接口。
@@ -155,3 +204,12 @@
   会将该位置 deferred，不生成 candidate/optimal 避障路线。
 - 查看 `robot_avoidance_trials.csv` 的 IK、collision、configuration、joint jump 和 J5 字段。
 - 当前不含工具/环境/自碰撞/扫掠体；即使显示 validated，也必须进入 RobotStudio 验证。
+
+## 支撑面生长错误或绿色区域进入墙体
+
+- 黄色是最终路径实际命中的 `face_id` 种子；若黄色不在目标 patch，先检查路径规划和
+  manifest，而不是调整生长阈值。
+- 绿色只应覆盖 patch 所在近共面支撑面。若越过圆角进入红色墙体，减小参考法向角或
+  参考平面距离；若过早停止，再小幅增加阈值，并保存前后截图和 summary。
+- `support-surface-failed` 会进入 deferred，不能回退到完整工件或 5 mm 模型假装成功。
+- 当前默认是近似平面恢复；明显自由曲面需要单独的曲面模式，不能把平面阈值无限放宽。

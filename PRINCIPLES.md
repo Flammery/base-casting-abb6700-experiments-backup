@@ -214,11 +214,15 @@ constant local TCP-Z roll library. Local Z roll preserves the contact point and
 tool axis, so it does not weaken `TCP +Z = -surface normal`.
 
 Only representative waypoints are screened with the project robot configuration,
-initial joint state, numerical IK, axis-configuration continuity, J5 margin,
-joint jumps, and an experiment-only 5 mm centerline-link model against the placed workpiece.
-Unselected planning regions must not enter this loop. No candidate result is a
-RobotStudio or real-cell safety certificate; tool, environment, self-collision,
-real robot-link envelopes, and swept motion remain outside this stage. Full rules are in
+initial joint state, numerical IK, joint continuity, J5 margin, FK collision, and
+sampled clearance against the placed workpiece. The previous successful joint
+solution is the next IK seed. A J1/J4/J6 confdata quadrant change is recorded but
+does not reject a solution; the actual joint-angle jump is the continuity rule.
+Unselected planning regions must not enter this loop. A geometrically valid path
+whose IK remains unresolved is retained for RobotStudio diagnosis but cannot enter
+the internally validated optimal output. No candidate result is a RobotStudio or
+real-cell safety certificate; tool, environment, self-collision, complete robot
+geometry, and swept motion remain outside this stage. Full rules are in
 `ROBOT_ARM_AVOIDANCE_WORKFLOW.md`.
 
 ## Y-Position Selection

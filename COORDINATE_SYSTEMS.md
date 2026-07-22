@@ -1,5 +1,21 @@
 # Tool, Workobject, and Placement Coordinates
 
+## 导入实验路径时的场景同步
+
+实验 RAPID 中的 wobj 与嵌入/结果元数据计算一致并通过校验后，主程序必须
+同时更新当前场景的 `model_transform` 和 `workobject_transform`：
+
+```text
+model XYZ/RX/RY/RZ = verified experiment installation
+wobj XYZ           = model XYZ + rotate_RZ(picked_origin)
+wobj RX/RY          = inherited project calibration
+wobj RZ             = verified experiment RZ
+```
+
+该同步只用于让当前软件场景中的工件模型、W 坐标系和已解析 RAPID 路径描述
+同一个物理安装位姿。RAPID robtarget 仍以程序内已解析的 wobj 为准；未通过
+wobj 校验时不得自动移动模型或显示的 W 坐标系。
+
 本文固化软件项目与实验脚本之间的工具坐标、工件坐标和安装位姿同步规则。修改位置扫描、转台角度、RAPID 导出或预览变换前必须阅读。
 
 ## 数据来源

@@ -1,5 +1,51 @@
 # Decision Log
 
+## D019 Successful experiment runs open their result directory
+
+- Date: 2026-07-22
+- Status: Accepted
+- Decision: after a successful configurable-runner process and a readable
+  `summary.json`, the experiment UI opens the resolved output directory. Failed
+  or cancelled processes do not open it; an Explorer launch failure is reported
+  in UI status and does not change the calculation result.
+- Related code: `ui/experiment_panel.py`.
+
+## D018 Avoidance IK uses joint continuity instead of a hard confdata lock
+
+- Date: 2026-07-22
+- Status: Accepted for experiment; shared solver unchanged
+- Background: sampled avoidance trials found numerically accurate solutions but
+  rejected them when J6 crossed a confdata quadrant boundary, including small
+  continuous motions across zero degrees.
+- Decision: every sampled avoidance waypoint uses the previous successful joint
+  solution as the next seed with `lock_configuration_to_seed=False`. Confdata
+  tuples remain diagnostics. Acceptance uses actual joint jump, J5 margin, IK
+  success, FK collision, and sampled clearance.
+- Output policy: geometrically non-empty paths are retained in candidate output
+  when internal IK is unresolved, but only `baseline-validated` and
+  `alternative-validated` avoidance rows may enter `optimal_paths`.
+- Rejected alternative: changing the shared `kinematics/solvers.py` before the
+  experiment policy has been validated on ABB/RobotStudio results.
+- Related code: `experimental_algorithms/robot_pose_avoidance.py`,
+  `scripts/optimal_y_score_configurable.py`, and
+  `scripts/optimal_y_selection.py`.
+
+## D017 Verified RAPID imports synchronize model and displayed workobject
+
+- Date: 2026-07-22
+- Status: Accepted; extends D015
+- Background: the imported experiment metadata moved only `model_transform`, so
+  the workpiece coordinate actor could remain at an earlier pose even though the
+  generated RAPID wobj had already passed verification.
+- Decision: after current-project/CAD identity and RAPID wobj verification pass,
+  apply the experiment X/Y/Z/RZ to the model and recompute the displayed
+  workobject XYZ from the rotated `picked_origin`; preserve calibrated wobj
+  RX/RY and set wobj RZ to the experiment angle.
+- Constraint: RAPID robtargets continue to use the parsed program wobj; the scene
+  must never derive model placement from an unverified wobj.
+- Related code: `src/robot_studio_qt/path_planning/rapid_import.py` and
+  `src/robot_studio_qt/ui/main_window.py`.
+
 本文件记录已经确认的架构决策、被否决方案和后续约束。新实现与这里冲突时，必须先更新决策状态，不能直接重试旧方案。
 
 ## D001 手动分区属于二维光栅域
@@ -138,14 +184,14 @@
 ## D014 指定 region/patch 的小型机械臂姿态库
 
 - 日期：2026-07-17
-- 状态：Accepted for experiment
+- 状态：Accepted for experiment；碰撞网格和最优规则由 D016 扩展
 - 背景：少数加工区可能因机械臂腕部或杆段构型靠近工件，需要在不修改工具 TCP、接触点
   和表面法向的前提下做局部姿态试验。
 - 决定：UI/CLI 只对用户指定的源 region 或 patch 测试整路径 TCP local-Z roll
   `[0,+15,-15,+30,-30]`；未指定项继续原 auto/base-y 策略。裸 `N` 匹配源 region 及其
   patches，`N-M/N_M/N.M` 精确匹配 patch，cell 不参与选择。
-- 筛查：最多 7 个代表点使用项目 ABB MDH、数值 IK、构型连续性、关节跳变、J5 余量和
-  机械臂—工件碰撞。当前算法试验将杆件简化为 5 mm 半径中心杆，不使用真实包络；
+- 筛查：最多 7 个代表点使用 ABB MDH、数值 IK、构型连续性、关节跳变、J5 余量和
+  机械臂碰撞。可导入主程序杆系包络；未导入时保留 5 mm 半径中心杆。
   工具/环境/自碰撞/扫掠体不在范围内。
 - 回退：第一个通过的候选生效；全部失败则标记 `fallback-unverified`。快速预览可保留
   base-y 供诊断，但正式 runner 必须 deferred，禁止生成 candidate/optimal 避障路线。
@@ -167,6 +213,27 @@
   但禁止自动移动模型。单独复制新 RAPID 文件时仍可依靠内嵌元数据复现位置。
 - 相关代码/测试：`scripts/window_conf_export.py`、`src/robot_studio_qt/path_planning/rapid_import.py`、
   `tests/test_window_conf_export.py`、`src/tests/path_planning/test_rapid_import.py`。
+
+## D016 避障 patch 的种子支撑面恢复与墙体距离
+
+- 日期：2026-07-20
+- 状态：Accepted for experiment
+- 背景：小 patch 所在加工面必然靠近路径，若完整工件网格直接参加最小距离评分，
+  加工面会掩盖真正需要绕开的腔体墙面。
+- 决定：只对用户指定的避障 region/patch，从最终路径 `Waypoint.face_id` 出发做共享边
+  区域生长。局部法向、相对种子法向和参考平面误差同时合格的三角形组成完整支撑面；
+  支撑面从墙体距离网格排除，剩余工件表面全部作为障碍。
+- 障碍采样：优先保留支撑面包围盒外扩 800 mm 内的障碍 cells，再用全局障碍补足
+  最多 6000 triangles，避免原全局步长采样优先漏掉邻近墙体。
+- 选择规则：加工窗口仍是硬条件；候选须达到最小墙体间隙阈值，再最小化 TCP local-Z
+  滚转角绝对值，相同角度以更大墙体间隙消除并列，不使用 base-Y 评分。
+- UI/日志：快速预览黄=路径种子、绿=排除支撑面、红=墙体障碍；summary 保存每个区域
+  的生长阈值、种子/支撑/障碍数量、参考法向和误差。
+- 边界：当前只恢复近似平面，不是自由曲面语义分割；机械臂仍为抽样点/简化包络，
+  不含工具、环境、自碰撞和连续扫掠验证。
+- 相关代码/测试：`experimental_algorithms/support_surface_growth.py`、
+  `scripts/optimal_y_score_configurable.py`、`ui/region_viewer.py`、
+  `tests/test_support_surface_growth.py`。
 
 ## 新决策模板
 

@@ -83,17 +83,35 @@ patch.
   face-id samples. Ordinary auto patches stay on the normal raster fast path.
 
 - `scripts/optimal_y_selection.py`
-  Lightweight selector for dual-robot rail experiments. It chooses one candidate
-  per region by `max(abs(world_y))` over processing waypoints only. Do not add
-  per-waypoint IK optimization here.
+  Lightweight selector for dual-robot rail experiments. Ordinary and hole-aware
+  regions use `max(abs(world_y))` over processing waypoints. Internally
+  validated avoidance rows instead minimize absolute TCP local-Z roll and then
+  maximize sampled robot clearance. Unresolved avoidance rows remain available
+  for RobotStudio diagnosis but do not enter optimal output.
+
+- `scripts/optimal_y_score_configurable.py`
+  Stable configurable CLI/UI runner. It scans the user-supplied installation
+  range and turntable angles, dispatches the reusable planners and optional
+  robot-pose avoidance, and writes candidate/optimal/diagnostic reports.
+
+- `scripts/robot_config_override.py`
+  Loads a main-application `robot_studio_mechanism_config` export for avoidance
+  trials. It validates six-axis MDH and nonzero per-link envelopes, then applies
+  the exported robot configuration/seed and enables configured segment radii.
 
 - `scripts/region_selectors.py` and `experimental_algorithms/robot_pose_avoidance.py`
-  Resolve plain regions and partition labels, then screen a five-entry local
-  TCP-Z roll library for explicitly requested planning regions only. The
-  experiment reuses src IK/FK and arm-link/workpiece collision, currently with
-  an explicit 5 mm centerline-link model instead of configured envelopes. It
-  excludes tool/environment/self/swept-volume collision. See
-  `ROBOT_ARM_AVOIDANCE_WORKFLOW.md` before changing this flow.
+  Region selectors and the five-entry TCP-Z roll library are active only for
+  user-selected avoidance regions. Each sampled waypoint uses the previous
+  successful joint solution as its next IK seed; confdata quadrant changes are
+  diagnostic only, while actual joint jumps, J5 margin, FK collision, and
+  clearance decide acceptance. Do not present this sampled result as ABB
+  interference validation.
+
+- `experimental_algorithms/support_surface_growth.py`
+  Recovers an avoidance patch's full near-planar support from final path
+  `face_id` seeds. It removes only that recovered support from the experimental
+  wall-distance mesh and prioritizes nearby obstacle triangles. Keep growth
+  diagnostics and the yellow/green/red preview whenever thresholds change.
 
 - `scripts/robotstudio_package.py`
   Packages selected Optimal-Y RAPID into one job per region/patch. It separates
@@ -108,9 +126,9 @@ patch.
   controller sequentially; validate one station at a time.
 
 - `scripts/runs/`
-  Concrete parameter-run entry points. They import the reusable scripts above
-  and set model X/Y/Z, angle lists, output directories, and feed variants for
-  one experiment batch.
+  Historical and concrete fixed-parameter experiment entries. They import the
+  reusable scripts above and preserve earlier standalone batches. New UI and
+  configurable runs use `scripts/optimal_y_score_configurable.py`.
 
 - root-level `window_conf_export_*.py` wrappers
   Historical compatibility entry points. Keep real implementations under
@@ -133,9 +151,10 @@ patch.
 - Avoidance selector `N` means source region N (including its patches), while
   `N-M`/`N_M`/`N.M` means one patch. Never interpret a selector as a hole-aware
   cell. Unselected planning regions must retain the former auto/base-y path.
-- Pose-library success is sampled internal screening, not a safety certificate.
-  Keep `fallback-unverified` explicit, suppress its formal candidate/optimal
-  export, and preserve per-candidate CSV/summary/deferred logs.
+- Do not suppress a geometrically valid candidate because the experimental
+  numerical IK did not converge. Keep the baseline path with an explicit
+  `ik-unresolved`/diagnostic status, but permit only `baseline-validated` or
+  `alternative-validated` avoidance rows to enter `optimal_paths`.
 - Risky or exploratory algorithms should start in `experimental_algorithms/`
   unless they are already part of this experiment's reusable script layer.
 - Hole-aware accepts either a complete manual-v2 `raster_chart + clip_polygon`

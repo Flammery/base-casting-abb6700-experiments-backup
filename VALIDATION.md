@@ -1,5 +1,25 @@
 # Validation Checklist
 
+## 2026-07-22 避障、坐标与结果目录回归项
+
+1. 分别输入转台角度 `23`、`271`、`300`，确认输出 snapshot、RAPID元数据、
+   模型 RZ 和显示的 wobj RZ 都使用实际角度，而不是固定角度表。
+2. 对非零 `picked_origin` 手算旋转平移后的 wobj XYZ，确认导入路径后模型和
+   W 坐标系同步，wobj RX/RY仍保持输入项目值。
+3. 构造 J6 从正小角度跨到负小角度的连续解，确认配置元组可以变化、实际
+   关节跳变很小并得到 `validated-clear`。
+4. 构造超过 40°的实际关节跳变，确认得到 `joint-discontinuous`；不要用
+   confdata 元组变化替代此检查。
+5. 避障区域确认五个 local-Z roll 都写入精简的
+   `robot_avoidance_trials.csv`，且包含 selected/status/interference/clearance/
+   joint-jump/reason。
+6. `ik-unresolved` 或支撑面恢复失败但几何非空的路径应保留在候选记录，且
+   不得进入 `optimal_paths`；普通区域仍按 world-Y规则进入最优选择。
+7. 检查抽样 IK/FK、连杆碰撞和最小间隙结果后，仍必须在 RobotStudio验证
+   完整路径、工具、环境、自碰撞和 ABB控制器构型。
+8. UI实验成功后应自动打开本次结果目录；失败进程不打开，Explorer 启动
+   失败只写状态、不改变实验完成结果。
+
 ## 自动测试
 
 ```powershell
@@ -44,7 +64,11 @@ C:\Users\21093\Desktop\p1\.venv\Scripts\python.exe -m pytest tests -q
     patch；未输入的区域候选仍为 `avoidance_status=not-requested`。
 16. 检查 `robot_avoidance_trials.csv` 五个 roll 均有记录，`summary.json` 的 requested、
     resolved labels、status counts 一致；`fallback-unverified` 不得显示为已安全。
-17. 对选中的替代姿态在 RobotStudio 检查完整路径、工具、环境、自碰撞和控制器构型。
+17. 快速预览确认黄色 seed 位于实际 patch，绿色支撑面覆盖 patch 所在完整面且没有越过
+    圆角进入墙体，红色包含需要绕开的腔体墙；核对 status 中的支撑面 cell 数。
+18. 检查 `summary.json.support_surface_growth.regions` 的 seed/support/obstacle 数、参考法向、
+    最大法向角和最大平面误差；`support-surface-failed` 不得进入 candidate/optimal。
+19. 对选中的替代姿态在 RobotStudio 检查完整路径、工具、环境、自碰撞和控制器构型。
 
 注意：快速预览与正式运行共用自动判定，但它只显示 processing raster，不显示完整的
 RAPID 抬刀/MoveJ 轨迹，因此不能代替 CSV/RAPID 和 RobotStudio 验收。
