@@ -230,6 +230,37 @@ class RegionPreview(QWidget):
         self.vtk_widget.GetRenderWindow().Render()
         self.set_message(f"path preview: {point_count} points / {run_count} continuous runs")
 
+    def show_support_surface_cells(self, support_cell_ids: set[int], seed_cell_ids: set[int]) -> None:
+        """Color recovered support, path seeds, and remaining wall obstacles."""
+
+        if self._reader is None:
+            return
+        polydata = self._reader.GetOutput()
+        cell_count = int(polydata.GetNumberOfCells())
+        colors = vtkUnsignedCharArray()
+        colors.SetNumberOfComponents(3)
+        colors.SetName("SupportObstacleColors")
+        support_color = (48, 188, 126)
+        seed_color = (250, 190, 42)
+        obstacle_color = (174, 88, 88)
+        for cell_id in range(cell_count):
+            if cell_id in seed_cell_ids:
+                color = seed_color
+            elif cell_id in support_cell_ids:
+                color = support_color
+            else:
+                color = obstacle_color
+            colors.InsertNextTypedTuple(color)
+        polydata.GetCellData().SetScalars(colors)
+        polydata.Modified()
+        for actor in self._texture_actors:
+            actor.SetVisibility(False)
+        self.vtk_widget.GetRenderWindow().Render()
+        self.set_message(
+            f"support preview: seeds={len(seed_cell_ids)} / support={len(support_cell_ids)} / "
+            f"obstacles={max(0, cell_count - len(support_cell_ids))}"
+        )
+
     def _raster_groups(self, project_path: Path, regions: list[set[int]]) -> list[dict]:
         manifest_path = manual_manifest_path_for(project_path)
         if not manifest_path.exists():

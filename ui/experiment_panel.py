@@ -4,7 +4,8 @@ import json
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, QTimer, Qt
+from PySide6.QtCore import QProcess, QTimer, Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -64,11 +65,16 @@ class ExperimentPanel(QWidget):
         self._current_region_count = 0
         self._last_result_dir: Path | None = None
         self._robotstudio_result_dir: Path | None = None
+        self._robot_config_override = None
+        self.robot_config_path: Path | None = None
 
         self.input_path = QLineEdit(str(DEFAULT_INPUT))
         self.input_path.setMinimumWidth(360)
         self.input_button = QPushButton("选择输入")
         self.region_count = QLabel("regions: -")
+        self.robot_config_button = QPushButton("导入杆系配置")
+        self.robot_config_label = QLabel("杆系: 项目内配置")
+        self.robot_config_label.setToolTip("未导入独立 .rsc.json；避障使用输入项目中的杆系配置和实验细杆模型。")
 
         self.partition_regions = QLineEdit("")
         self.partition_regions.setPlaceholderText("留空=当前唯一region")
@@ -112,6 +118,8 @@ class ExperimentPanel(QWidget):
         first_row.setContentsMargins(0, 0, 0, 0)
         first_row.addWidget(self.input_button)
         first_row.addWidget(self.input_path)
+        first_row.addWidget(self.robot_config_button)
+        first_row.addWidget(self.robot_config_label)
         first_row.addWidget(self.region_count)
         first_row.addWidget(QLabel("分区"))
         first_row.addWidget(self.partition_regions)
@@ -144,12 +152,14 @@ class ExperimentPanel(QWidget):
         third_row.setContentsMargins(0, 0, 0, 0)
         third_row.addWidget(self.robotstudio_button)
         third_row.addWidget(QLabel("每个最优面生成工作站；场景安装位置与 RAPID 工件坐标相互独立，按面顺序验证"))
+        third_row.addWidget(QLabel("快速预览仅显示几何；正式实验执行避障 IK/FK，最终仍需 ABB/RobotStudio 验证"))
         third_row.addStretch(1)
         layout.addLayout(third_row)
         layout.addWidget(self.preview, 1)
         layout.addWidget(self.status)
 
         self.input_button.clicked.connect(self.choose_input)
+        self.robot_config_button.clicked.connect(self.choose_robot_config)
         self.apply_partition_button.clicked.connect(self.apply_partition)
         self.preview_path_button.clicked.connect(self.preview_paths)
         self.start_button.clicked.connect(self.start_run)
@@ -179,6 +189,37 @@ class ExperimentPanel(QWidget):
         if path:
             self.input_path.setText(path)
             self.refresh_region_count()
+
+    def choose_robot_config(self) -> None:
+        initial_dir = (
+            self.robot_config_path.parent
+            if self.robot_config_path is not None
+            else ROOT / "src"
+        )
+        path, _filter = QFileDialog.getOpenFileName(
+            self,
+            "导入杆系配置",
+            str(initial_dir),
+            "Robot Studio Configuration (*.rsc.json);;JSON (*.json);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            override = path_preview_backend.load_robot_config_override(path)
+        except Exception as exc:
+            self.status.setText(f"杆系配置导入失败: {exc}")
+            QMessageBox.warning(self, "杆系配置导入失败", str(exc))
+            return
+
+        self._robot_config_override = override
+        self.robot_config_path = override.path
+        envelope_text = ", ".join(
+            f"J{row['joint']}={row['collision_radius_mm']:g}mm"
+            for row in override.envelope_rows()
+        )
+        self.robot_config_label.setText(f"杆系: {override.name}")
+        self.robot_config_label.setToolTip(f"{override.path}\n碰撞半径: {envelope_text}")
+        self.status.setText(f"已导入杆系配置: {override.name} | {override.path} | {envelope_text}")
 
     def refresh_region_count(self) -> None:
         path = Path(self.input_path.text())
@@ -213,7 +254,10 @@ class ExperimentPanel(QWidget):
             return
         try:
             project_path = Path(self.input_path.text())
+            self.preview.load_project(project_path)
             project = path_preview_backend.load_project_file(project_path)
+            if self._robot_config_override is not None:
+                self._robot_config_override.apply_to_project(project)
             regions = [set(region) for region in project.selected_path_face_regions]
             if not regions:
                 raise ValueError("当前项目没有已选择的加工面。")
@@ -251,7 +295,6 @@ class ExperimentPanel(QWidget):
             cell_transfer_count = 0
             planner_reasons: dict[str, int] = {}
             avoidance_statuses: dict[str, int] = {}
-            collision_mesh = None
             for planning_region in planning_regions:
                 result, use_cell_transfer, planner_reason = path_preview_backend.plan_region_uv_auto(
                     polydata,
@@ -269,24 +312,8 @@ class ExperimentPanel(QWidget):
                     planning_region["source_region"],
                 ) if avoidance_selector_set else False
                 if result.waypoints and avoidance_selected:
-                    if collision_mesh is None:
-                        collision_settings = path_preview_backend.CollisionSettings(ignore_tcp_segment=False)
-                        collision_mesh = path_preview_backend.CollisionMesh.from_polydata(
-                            polydata,
-                            placement,
-                            collision_settings.max_triangles,
-                        )
-                    selection = path_preview_backend.select_robot_pose(
-                        result,
-                        polydata,
-                        placement,
-                        project.robot_config,
-                        project.joint_state,
-                        project.polishing_tool,
-                        collision_mesh=collision_mesh,
-                    )
-                    result = selection.path
-                    avoidance_statuses[selection.status] = avoidance_statuses.get(selection.status, 0) + 1
+                    status = "待正式运行IK/FK"
+                    avoidance_statuses[status] = avoidance_statuses.get(status, 0) + 1
                 if result.waypoints:
                     paths.append(result)
                     cell_transfer_count += int(use_cell_transfer)
@@ -297,7 +324,8 @@ class ExperimentPanel(QWidget):
             total = sum(len(path.waypoints) for path in paths)
             self.status.setText(
                 f"快速预览完成: angle={self._preview_angle()}° | regions={len(paths)} | points={total} | "
-                f"cell抬刀={cell_transfer_count} | 判定={planner_reasons} | 避障={avoidance_statuses or '未启用'}"
+                f"cell抬刀={cell_transfer_count} | 判定={planner_reasons} | 避障={avoidance_statuses or '未启用'} | "
+                "快速预览仅显示几何，正式实验执行避障IK/FK"
             )
         except Exception as exc:
             self.status.setText(f"快速预览失败: {exc}")
@@ -385,6 +413,7 @@ class ExperimentPanel(QWidget):
                 self.boundary_margin.text(),
                 planner,
                 self.avoidance_regions.text(),
+                self.robot_config_path,
             )
         except Exception as exc:
             self.status.setText(f"实验参数错误: {exc}")
@@ -398,6 +427,7 @@ class ExperimentPanel(QWidget):
         self.apply_partition_button.setEnabled(False)
         self.preview_path_button.setEnabled(False)
         self.robotstudio_button.setEnabled(False)
+        self.robot_config_button.setEnabled(False)
         self.avoidance_regions.setEnabled(False)
         self.turntable_angles.setEnabled(False)
         self._runner_output = ""
@@ -429,6 +459,7 @@ class ExperimentPanel(QWidget):
         self.apply_partition_button.setEnabled(True)
         self.preview_path_button.setEnabled(True)
         self.robotstudio_button.setEnabled(True)
+        self.robot_config_button.setEnabled(True)
         self.avoidance_regions.setEnabled(True)
         self.turntable_angles.setEnabled(True)
         if exit_code != 0:
@@ -452,7 +483,8 @@ class ExperimentPanel(QWidget):
         summary_path = self._summary_path_from_output()
         if summary_path and summary_path.exists():
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            self._last_result_dir = Path(summary.get("output_dir", summary_path.parent))
+            reported_result_dir = Path(summary.get("output_dir", summary_path.parent))
+            self._last_result_dir = reported_result_dir if reported_result_dir.is_absolute() else summary_path.parent
             self.status.setText(
                 "完成: "
                 f"output={summary.get('output_dir', summary_path.parent)} | "
@@ -463,10 +495,18 @@ class ExperimentPanel(QWidget):
                 f"candidates={summary.get('candidate_count', '-')} | "
                 f"optimal={summary.get('optimal_region_count', '-')}"
             )
+            if not self._open_result_directory(self._last_result_dir):
+                self.status.setText(f"{self.status.text()} | 结果文件夹未能自动打开")
             QMessageBox.information(self, "完成", self.status.text())
             return
         self.status.setText("完成: 未找到 summary.json，请查看脚本输出。")
         QMessageBox.information(self, "完成", self.status.text())
+
+    @staticmethod
+    def _open_result_directory(result_dir: Path) -> bool:
+        if not result_dir.is_dir():
+            return False
+        return QDesktopServices.openUrl(QUrl.fromLocalFile(str(result_dir.resolve())))
 
     def export_to_robotstudio(self) -> None:
         if self._process is not None:

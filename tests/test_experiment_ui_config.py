@@ -19,7 +19,7 @@ def _load_ui_config_module():
 
 
 def _load_runner_module():
-    script = Path(__file__).resolve().parents[1] / "scripts" / "runs" / "optimal_y_score_configurable.py"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "optimal_y_score_configurable.py"
     spec = importlib.util.spec_from_file_location("optimal_y_score_configurable_test", script)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -67,6 +67,7 @@ def test_turntable_angle_arguments_accept_single_and_multiple_angles() -> None:
     module = _load_ui_config_module()
 
     assert module.parse_turntable_angle_text("270") == [270]
+    assert module.parse_turntable_angle_text("271") == [271]
     assert module.parse_turntable_angle_text("0,180") == [0, 180]
     assert module.parse_turntable_angle_text("360,-30,330") == [0, 330]
     assert module.turntable_angle_args("0,30,180") == [
@@ -156,6 +157,28 @@ def test_runner_command_adds_normalized_avoidance_regions_only_when_requested(tm
     assert avoidance[avoidance.index("--avoidance-regions") + 1] == "1_1,2"
 
 
+def test_runner_command_adds_robot_configuration_when_selected(tmp_path) -> None:
+    module = _load_ui_config_module()
+    config_path = tmp_path / "ABB 6700 Style.rsc.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    command = module.runner_command(
+        "python",
+        tmp_path / "input.rsp.json",
+        "3700",
+        "0",
+        "440",
+        "270",
+        "1500,2500;-1050,1050",
+        "6",
+        "auto",
+        "1",
+        config_path,
+    )
+
+    assert command[command.index("--robot-config") + 1] == str(config_path)
+
+
 def test_configurable_runner_defaults_to_auto_planner() -> None:
     module = _load_runner_module()
 
@@ -188,6 +211,50 @@ def test_configurable_runner_angle_range_excludes_duplicate_360() -> None:
 
     assert module.parse_angles_range("0,360,10")[-1] == 350
     assert len(module.parse_angles_range("0,360,10")) == 36
+
+
+def test_current_avoidance_report_keeps_only_review_fields() -> None:
+    from types import SimpleNamespace
+
+    module = _load_runner_module()
+    trial = SimpleNamespace(
+        roll_degrees=-15.0,
+        validation_status="validated-clear",
+        interference="not-detected",
+        minimum_clearance_mm=12.5,
+        max_joint_jump_degrees=8.0,
+        message="sampled waypoints validated",
+    )
+
+    row = module.compact_avoidance_report_row(
+        3400.0,
+        -1800.0,
+        440.0,
+        271,
+        "1_1",
+        "long_side",
+        "alternative-validated",
+        True,
+        trial=trial,
+    )
+
+    assert list(row) == [
+        "model_x",
+        "model_y",
+        "model_z",
+        "angle_deg",
+        "region_label",
+        "feed_variant",
+        "tool_roll_deg",
+        "selected",
+        "status",
+        "interference",
+        "minimum_clearance_mm",
+        "max_joint_jump_deg",
+        "reason",
+    ]
+    assert row["tool_roll_deg"] == -15.0
+    assert row["interference"] == "not-detected"
 
 
 def test_configurable_runner_coordinate_specs_and_scan_axis() -> None:

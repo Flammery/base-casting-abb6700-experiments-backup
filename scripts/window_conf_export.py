@@ -55,11 +55,20 @@ from hole_aware_raster import (  # noqa: F401 - runner API
 )
 from region_selectors import parse_region_selectors, selector_matches, validate_selectors  # noqa: F401 - shared UI/runner API
 from robot_pose_avoidance import (  # noqa: F401 - experimental runner API
+    DEFAULT_SAMPLE_LIMIT,
+    DEFAULT_MIN_CLEARANCE_MM,
     EXPERIMENT_CLEARANCE_MM,
     EXPERIMENT_LINK_RADIUS_MM,
     EXPERIMENT_USE_SEGMENT_RADIUS,
     POSE_ROLL_DEGREES,
     select_robot_pose,
+)
+from robot_config_override import load_robot_config_override  # noqa: F401 - shared UI/runner API
+from support_surface_growth import (  # noqa: F401 - experimental runner/UI API
+    SupportGrowthSettings,
+    build_obstacle_mesh_template,
+    grow_support_surface,
+    path_seed_cell_ids,
 )
 
 

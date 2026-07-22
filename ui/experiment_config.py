@@ -9,12 +9,12 @@ ROOT = EXPERIMENT_DIR.parents[1]
 DEFAULT_INPUT = EXPERIMENT_DIR / "inputs" / "latest_script_test.rsp.json"
 DEFAULT_PARTITIONED = EXPERIMENT_DIR / "inputs" / "latest_partitioned.rsp.json"
 PARTITION_SCRIPT = EXPERIMENT_DIR / "scripts" / "region_partition_preprocess.py"
-RUNNER_SCRIPT = EXPERIMENT_DIR / "scripts" / "runs" / "optimal_y_score_configurable.py"
+RUNNER_SCRIPT = EXPERIMENT_DIR / "scripts" / "optimal_y_score_configurable.py"
 SCRIPT_DIR = EXPERIMENT_DIR / "scripts"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from region_selectors import parse_region_selectors
+from region_selectors import parse_region_selectors  # noqa: E402
 
 DEFAULT_X = "3700"
 DEFAULT_Y = "-1900,100,1900"
@@ -188,6 +188,7 @@ def runner_command(
     boundary_margin_text: str = DEFAULT_BOUNDARY_MARGIN,
     planner: str = "legacy",
     avoidance_regions: str = "",
+    robot_config_path: Path | None = None,
 ) -> list[str]:
     scan_axis_for_coordinates(model_x, model_y, model_z)
     boundary_margin = parse_boundary_margin_text(boundary_margin_text)
@@ -209,6 +210,11 @@ def runner_command(
     avoidance_selectors = parse_region_selectors(avoidance_regions)
     if avoidance_selectors:
         command.extend(["--avoidance-regions", ",".join(avoidance_selectors)])
+    if robot_config_path is not None:
+        config_path = Path(robot_config_path)
+        if not config_path.is_file():
+            raise ValueError(f"杆系配置文件不存在: {config_path}")
+        command.extend(["--robot-config", str(config_path)])
     limits = parse_custom_window_text(window_text)
     if all(limit is None for limit in limits.values()):
         command.extend(["--window-mode", "unlimited"])

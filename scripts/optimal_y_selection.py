@@ -13,9 +13,13 @@ def score_max_abs_world_y(path) -> float:
 
 
 def choose_best_by_region(candidate_rows: Iterable[dict]) -> list[dict]:
-    """Choose one best candidate per region using max(abs(world_y)) only.
+    """Choose one best candidate per region with a scope-specific policy.
 
-    Tie breakers are deterministic output policy, not extra optimization metrics.
+    Ordinary and hole-aware candidates retain the historical world-Y score.
+    Internally validated avoidance candidates minimize absolute TCP roll and
+    then maximize sampled clearance. Unresolved avoidance rows may remain in
+    ``all_candidates.csv`` for RobotStudio diagnosis, but the configurable
+    runner filters them before calling this selector for optimal output.
     """
     by_region: dict[int, list[dict]] = {}
     for row in candidate_rows:
@@ -23,6 +27,24 @@ def choose_best_by_region(candidate_rows: Iterable[dict]) -> list[dict]:
 
     best_rows: list[dict] = []
     for _region, rows in sorted(by_region.items()):
+        avoidance_rows = [
+            row
+            for row in rows
+            if bool(row.get("avoidance_selected"))
+            and str(row.get("avoidance_status", "")) in {"baseline-validated", "alternative-validated"}
+            and row.get("avoidance_min_clearance_mm") is not None
+        ]
+        if avoidance_rows:
+            best_rows.append(
+                min(
+                    avoidance_rows,
+                    key=lambda row: (
+                        abs(float(row["avoidance_roll_degrees"])),
+                        -float(row["avoidance_min_clearance_mm"]),
+                    ),
+                )
+            )
+            continue
         best_rows.append(
             min(
                 rows,
@@ -67,6 +89,9 @@ def candidate_table_row(row: dict) -> dict:
         "model_z": row["model_z"],
         "angle_deg": row["angle_deg"],
         "covered_region": str(row.get("region_label", f"{int(row['region']):02d}")),
+        "avoidance_status": row.get("avoidance_status", "not-requested"),
+        "tool_roll_deg": row.get("avoidance_roll_degrees", ""),
+        "interference": row.get("avoidance_interference", "not-requested"),
     }
 
 
@@ -78,6 +103,9 @@ def best_table_row(row: dict) -> dict:
         "model_z": row["model_z"],
         "angle_deg": row["angle_deg"],
         "covered_region": str(row.get("region_label", f"{int(row['region']):02d}")),
+        "avoidance_status": row.get("avoidance_status", "not-requested"),
+        "tool_roll_deg": row.get("avoidance_roll_degrees", ""),
+        "interference": row.get("avoidance_interference", "not-requested"),
     }
 
 
