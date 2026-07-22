@@ -223,7 +223,7 @@ whose IK remains unresolved is retained for RobotStudio diagnosis but cannot ent
 the internally validated optimal output. No candidate result is a RobotStudio or
 real-cell safety certificate; tool, environment, self-collision, complete robot
 geometry, and swept motion remain outside this stage. Full rules are in
-`ROBOT_ARM_AVOIDANCE_WORKFLOW.md`.
+`docs/ROBOT_ARM_AVOIDANCE_WORKFLOW.md`.
 
 ## Y-Position Selection
 

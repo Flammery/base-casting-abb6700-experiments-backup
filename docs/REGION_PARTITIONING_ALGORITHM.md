@@ -1,8 +1,8 @@
-# 底座打磨自动 selected-region 分区算法
+# 底座打磨自动 selected-region 分区算法（当前实现）
 
 > 说明：本文只描述自动 face-id 分区算法。手动 boundary/slab/pick 属于独立的
-> manifest v2 raster-domain 流程，操作说明见 `README.md`，字段见
-> `MANIFEST_SCHEMA.md`，约束与历史决策见 `PRINCIPLES.md` 和 `DECISION_LOG.md`。
+> manifest v2 raster-domain 流程，操作说明见 `../README.md`，字段见
+> `../MANIFEST_SCHEMA.md`，约束与历史决策见 `../PRINCIPLES.md` 和 `../DECISION_LOG.md`。
 
 本文说明 `scripts/region_partitioning.py` 当前的 selected region 预处理逻辑。它只属于
 `experiments/base_casting_abb6700` 实验层，不修改 `src/` 软件库，也不改变项目 `.rsp.json`
@@ -122,13 +122,18 @@ base Y 切成两个约 `800 x 1200` 的小区。
 中减去 `exclude_polygons`，再沿 `raster_chart.normal` 射线命中选中 STL。STL 在该
 流程中只提供 XYZ、face id 和 facet normal。两条路径不能混写成同一个算法说明。
 
-## 7. 干涉检测预留
+## 7. 与干涉检测的边界
 
-干涉检测本次不实现。manifest 中每个 patch 记录：
+自动 face-id 分区阶段本身不执行干涉检测。分区 manifest 中每个 patch 仍只记录：
 
 ```json
 "collision_status": "not_evaluated"
 ```
 
-后续可以新增独立脚本读取 manifest、分区 face id 和角度组，对每个 patch 做机器人/工件/柱子干涉评估，
-再把结果回写到新的报告或 manifest 扩展字段。
+当前实验的可选避障筛查在后续 `scripts/optimal_y_score_configurable.py` 中执行：它根据
+用户的 region/patch selector，从最终几何路径恢复支撑面，构造墙体障碍网格，再调用
+`experimental_algorithms/robot_pose_avoidance.py` 做代表点 IK/FK、杆系碰撞和间隙粗筛。
+结果写入候选/最优记录和 `robot_avoidance_trials.csv`，不会回写这里的自动分区 manifest。
+
+这仍不是完整干涉验证：分区阶段的 `collision_status` 保持 `not_evaluated`，后续筛查也只
+覆盖抽样机器人杆段与工件墙体，不含工具实体、自碰撞、环境和连续运动扫掠。

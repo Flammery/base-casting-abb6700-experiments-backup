@@ -1,6 +1,6 @@
-# Robot Arm Avoidance Trial Workflow
+# Robot Arm Avoidance Trial Workflow（实验粗筛）
 
-## Current stage: 2026-07-22 (supersedes the legacy paragraph below)
+## Current stage: 2026-07-22
 
 The UI/configurable runner again executes the experimental avoidance pipeline
 for explicitly selected regions only:
@@ -30,11 +30,14 @@ complete robot safety validation.
 
 ## 当前阶段（2026-07-22）
 
-UI/configurable runner 暂停实验层数值 IK/FK、杆系碰撞筛查和 TCP-Z roll 枚举。
-几何窗口内且成功生成路径的 candidate 不再因实验 IK 失败而被删除；工具转角保持 `0°`。
-`robot_avoidance_trials.csv` 只写 X/Y/Z、转台角度、region、工具转角和干涉状态，未在
-ABB/RobotStudio 验证前统一标记为“未评估”。下文描述的是保留的历史试验算法，不是
-当前 UI 默认执行流程。
+UI 的“快速预览”只生成并显示几何路径，不执行 IK/FK 或碰撞筛查；状态栏会显示
+“待正式运行 IK/FK”。点击正式运行后，configurable runner 只对“避障区域”命中的
+region/patch 执行数值 IK、FK 杆系碰撞、最小间隙和 TCP-Z roll 枚举。未命中的区域仍走
+原有几何路径流程。
+
+几何路径即使在实验 IK 中 unresolved，也会保留在 `candidates/` 供 ABB/RobotStudio
+诊断；但只有 `baseline-validated` 和 `alternative-validated` 能进入 `optimal_paths/`。
+因此不能把 `candidates/` 中存在 RAPID 文件理解成“已经避障通过”。
 
 本文件说明实验 UI 中“避障区域”的机械臂姿态试验。该功能是候选筛查，不能替代
 RobotStudio 或真实设备的安全验证。
@@ -79,8 +82,8 @@ region/patch selector
 
 局部 Z roll 不改变 TCP 位置或 `TCP +Z = -surface normal`，只改变 TCP X/Y 和
 机械臂腕部绕法向的构型。若所有候选均失败，状态为 `fallback-unverified`：快速预览
-可保留原 `base_y` 供诊断，但正式 runner 必须把该位置写入 deferred，禁止生成
-candidate/optimal 避障路线。
+和正式 runner 都可保留原 `base_y` 几何路径供诊断；正式 runner 仍会把它写入
+`candidates/`，但会在选择最优路径前将其过滤，禁止进入 `optimal_paths/`。
 
 支撑面恢复使用网格邻接区域生长。候选三角形必须同时满足局部法向夹角、相对种子
 参考法向和参考平面距离阈值；墙面、明显圆角和台阶会停止生长。快速预览颜色为：

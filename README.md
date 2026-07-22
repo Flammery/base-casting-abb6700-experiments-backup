@@ -28,7 +28,7 @@ Optimal-Y 完成后，可在实验 UI 点击“导入 RobotStudio 验证”，�
 设计决策见 `DECISION_LOG.md`，manifest 字段见 `MANIFEST_SCHEMA.md`，已知故障见
 `TROUBLESHOOTING.md`，坐标同步见 `COORDINATE_SYSTEMS.md`，提交前验收见
 `VALIDATION.md`。带孔连续路径的行为和限制见 `HOLE_AWARE_PLANNER.md`。指定
-region/patch 的机械臂替代姿态试验见 `ROBOT_ARM_AVOIDANCE_WORKFLOW.md`。
+region/patch 的机械臂替代姿态试验见 `docs/ROBOT_ARM_AVOIDANCE_WORKFLOW.md`。
 
 ## 中文说明
 

@@ -1,4 +1,4 @@
-# Auto 如何判断“带孔区域”：代码与教学说明
+# Auto 如何判断“带孔区域”：当前代码与教学说明
 
 > **版本说明（2026-07-15）**：自动判定仍保留“相关 exclude”与“同一扫描线多个 run”
 > 两级触发，但相关 exclude 现在明确为与 clip 有正面积重叠：完全位于 clip 内是真正内部孔，
@@ -31,31 +31,24 @@
 
 ### 1.1 Auto 分流总入口
 
-文件：
+实际分流函数在：
 
 ```text
-scripts/optimal_y_score_configurable.py
+scripts/window_conf_export.py::plan_region_uv_auto()
 ```
 
-关键代码位于 `run_optimal_scan()` 中，大致是第 373～400 行：
+`scripts/optimal_y_score_configurable.py::run_optimal_scan()` 在正式批量运行时调用该函数；
+实验 UI 的快速预览也调用同一个函数。核心逻辑是：
 
 ```python
-relevant_holes = polygon_has_relevant_holes(
-    planning_region.get("clip_polygon"),
-    planning_region.get("exclude_polygons") or [],
-)
+if polygon_has_relevant_holes(clip_polygon, holes):
+    return plan_region_uv_hole_aware(...), True, "exclude-overlap"
 
-use_hole_aware = (
-    args.planner == "hole-aware"
-    or (args.planner == "auto" and relevant_holes)
-)
+regular_path = plan_region_uv(...)
+if path_has_split_scanlines(regular_path):
+    return plan_region_uv_hole_aware(...), True, "split-scanline"
 
-planner = plan_region_uv_hole_aware if use_hole_aware else plan_region_uv
-path = planner(...)
-
-if args.planner == "auto" and not use_hole_aware and path_has_split_scanlines(path):
-    use_hole_aware = True
-    path = plan_region_uv_hole_aware(...)
+return regular_path, False, "regular-raster"
 ```
 
 可以画成：
@@ -96,8 +89,6 @@ experimental_algorithms/hole_aware_raster.py
 ```python
 polygon_has_relevant_holes(polygon, holes)
 ```
-
-大致位于第 81～113 行。
 
 它的任务不是识别三维圆孔，而是回答：
 
@@ -162,7 +153,8 @@ patch 的任意边
 hole 的任意边相交
 ```
 
-只要存在一对相交边，就返回 `True`。
+只要存在一对“穿过彼此内部”的边，就返回 `True`。当前实现使用严格相交测试，单点接触
+或沿边界贴合不算相关 hole；这与文件开头所说的“正面积重叠”一致。
 
 ### 2.3 简化伪代码
 
@@ -181,7 +173,7 @@ def polygon_has_relevant_holes(patch, holes):
         if patch 的某个点在 hole 内:
             return True
 
-        if patch 边与 hole 边相交:
+        if patch 边与 hole 边发生严格内部相交:
             return True
 
     return False
@@ -340,8 +332,6 @@ path_has_split_scanlines(path)
 ```text
 scripts/window_conf_export.py
 ```
-
-大致位于第 241～246 行。
 
 ### 4.1 为什么需要第二级判定
 
@@ -519,9 +509,8 @@ Hole-aware 需要：
 ```text
 建立 runs
 分解 cells
-计算 cell 顺序
-多次运行 A*
-逐点 ray-lift connector
+按扫描发现顺序整理完整 cell
+在导出阶段为每个 cell 添加抬刀和离面转场
 ```
 
 普通无孔矩形面没有必要承担这些计算开销。
@@ -535,11 +524,11 @@ Hole-aware 需要：
 真正连续：保留快速 raster
 ```
 
-这种架构思路本身是合理的。本次问题主要在于：
+这种架构思路本身是合理的。需要注意：
 
 - 极小边界 loop 也会触发第一级；
 - 第二级发现的是 ray-lift 不连续，不一定是实体孔；
-- hole-aware 后续的 cell 访问顺序存在限制。
+- hole-aware 只解决加工域不连续处的 TCP 抬刀转场，不解决机器人杆件避障。
 
 ---
 
@@ -645,7 +634,7 @@ split = path_has_split_scanlines(path)
 
 ```text
 进入 hole-aware：只是 planner 选择结果
-hole-aware deferred：才是后续 cell/connector 规划失败
+hole-aware 无路径点：表示当前 raster/cell 阶段没有有效样本；当前实现不再运行 A*/connector
 ```
 
 不要把两者当成同一个问题。
@@ -713,17 +702,18 @@ path_has_split_scanlines()
 ### 10.5 Auto 总编排
 
 ```text
-scripts/optimal_y_score_configurable.py
+scripts/window_conf_export.py
 ```
 
-阅读 `run_optimal_scan()` 中：
+阅读 `plan_region_uv_auto()` 中：
 
 ```text
 relevant_holes
-use_hole_aware
-planner
 path_has_split_scanlines
 ```
+
+再阅读 `scripts/optimal_y_score_configurable.py::run_optimal_scan()`，确认正式 runner 怎样
+调用统一分流函数并记录 `planner_reason`。
 
 ---
 
@@ -751,7 +741,7 @@ Patch 没有 `exclude_polygons`，是否一定使用普通 raster？
 
 为什么不直接对所有面使用 hole-aware？
 
-答案：普通连续面使用快速 raster 足够；cell 分解、A* 和 connector ray-lift 会增加大量计算。
+答案：普通连续面使用快速 raster 足够；cell 分解以及逐 cell 抬刀/转场会增加路径点和运动段数量。
 
 ### 练习 5
 

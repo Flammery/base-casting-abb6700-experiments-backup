@@ -1,10 +1,11 @@
-# Hole-Aware、Cell 图、贪心算法与 A* 入门
+# Hole-Aware、Cell 抬刀与旧 A* 原型入门
 
-> **版本说明（2026-07-15）**：本文对 cell 图、贪心和 A* 的讲解仍可作为算法学习资料，
-> 其中标为“当前实现”的连续贴面 connector 内容描述的是 2026-07-13 原型，已与现在不同。
+> **版本说明（2026-07-22）**：本文对 cell 图、贪心和 A* 的讲解仍可作为算法学习资料，
+> 但连续贴面 connector 内容描述的是 2026-07-13 旧原型，统一标为“旧原型”，不代表
+> 当前工程。
 > 当前工程保留 run/cell 分解，但按原扫描顺序完整加工每个 cell；cell 之间法向抬刀并
 > 离面转场，不再运行 cell 图贪心、A* 或 connector ray-lift。当前合同见
-> `HOLE_AWARE_PLANNER.md`，决策见 `DECISION_LOG.md` 的 D013。
+> `../HOLE_AWARE_PLANNER.md`，决策见 `../DECISION_LOG.md` 的 D013。
 > manual-v2 与未划分的原始 face-id region 现在都能进入这套 cell 抬刀规划。
 
 本文面向第一次接触路径规划算法的读者，结合本项目 `1_2` 蓝色加工区域的真实实验，解释：
@@ -22,6 +23,7 @@
 | 标签 | 含义 |
 | --- | --- |
 | **【当前实现】** | 当前仓库代码已经按这种方式运行 |
+| **【旧原型·已停用】** | 2026-07-13 的 A*/connector 实验，仅用于理解历史问题 |
 | **【本次诊断】** | 对 `1_2` 当前输入做只读实验得到的事实 |
 | **【参考改进·未实现】** | 论文、开源实现或本次分析提出的方向，当前代码尚未实现 |
 
@@ -64,17 +66,18 @@ V: 47.546 ～ 55.500
 
 ```text
 保留全部 exclude_polygons：
-121 samples，9 runs，3 cells，hole-aware 失败
+121 samples，9 runs，3 cells
 
 删除全部 exclude_polygons：
-121 samples，9 runs，3 cells，hole-aware 仍然失败
+121 samples，9 runs，3 cells
 ```
 
 这说明真正造成扫描线分裂的不是上方那个小三角形，而是二维采样点向选中 STL 表面投射时，中间有一段位置没有 ray hit。
 
 普通 raster 会发现同一条 scanline 上出现两个互不连续的 run。`auto` 为了避免用一条直线把两个 run 强行连接起来，会再次升级为 hole-aware。
 
-因此，当前代码里的 hole-aware 更准确的理解是：
+旧 A*/connector 原型会在这组 3-cell 数据上因访问顺序失败；当前实现不会再尝试
+贴面连接，而是完成一个 cell 后抬刀并离面转场。因此，当前代码里的 hole-aware 更准确的理解是：
 
 > 它不只是“圆孔处理器”，而是“扫描域不连续时的安全连续路径规划器”。
 
@@ -283,9 +286,9 @@ cell 0 → cell 2 → cell 1
 
 ---
 
-## 5. 【当前实现】当前算法怎样选择第一个 cell
+## 5. 【旧原型·已停用】旧算法怎样选择第一个 cell
 
-当前实现选择“最早扫描线所在的 cell”作为第一个 cell：
+2026-07-13 原型选择“最早扫描线所在的 cell”作为第一个 cell：
 
 ```python
 first_cell = min(
@@ -324,7 +327,9 @@ first_cell = min(
 0 → 2 → 1   最后需要 2 → 1
 ```
 
-这就是本次失败的核心。
+这就是旧原型当时失败的核心。当前实现只按
+`(最早 line_index, 最小 u_min, cell_id)` 对 cells 做确定性排序，不要求相邻 cell 之间
+存在贴面 connector。
 
 ---
 
@@ -433,7 +438,7 @@ degree(2) = 1
 - 不保证全局最短；
 - 甚至不保证最后有解。
 
-### 7.2 当前 hole-aware 中的贪心选择
+### 7.2 【旧原型·已停用】旧 hole-aware 中的贪心选择
 
 当前候选大致按以下优先级排序：
 
@@ -624,9 +629,9 @@ while open_set:
 return no_path
 ```
 
-### 8.6 本项目的 A* 网格分辨率
+### 8.6 【旧原型·已停用】旧原型的 A* 网格分辨率
 
-本项目 connector A* 初始 resolution 大致是：
+旧 connector A* 的初始 resolution 大致是：
 
 ```text
 resolution = 0.5 × min(scanline spacing, point step)
@@ -652,7 +657,8 @@ resolution = 25 mm
 缺点：窄通道可能在网格上消失，被误判为无路
 ```
 
-当前实现还会限制网格节点总数；大区域节点过多时，会自动放大 resolution。这是文档中“窄通道可能被判定失败”的来源之一。
+旧原型还会限制网格节点总数；大区域节点过多时会自动放大 resolution。这些参数已不在
+当前 `experimental_algorithms/hole_aware_raster.py` 中。
 
 ---
 
@@ -660,9 +666,9 @@ resolution = 25 mm
 
 A* 不知道什么是加工面，它只知道哪些节点可通行。定义“可通行节点”的规则，就是导航域。
 
-### 9.1 当前二维导航域
+### 9.1 【旧原型·已停用】旧二维导航域
 
-当前 `_free(point)` 的含义基本是：
+旧 `_free(point)` 的含义基本是：
 
 ```text
 点在 clip polygon 内
@@ -790,7 +796,7 @@ facet normal
 
 ---
 
-## 11. 【本次诊断】用本次 `1_2` 完整重放一次算法
+## 11. 【旧原型·已停用】用 `1_2` 重放 2026-07-13 算法
 
 ### 第一步：auto 快速检查 hole polygon
 
@@ -885,13 +891,14 @@ No free-domain connector between raster cells.
 
 在当前 connector 和 ray-lift 判定下是可行的。
 
-这证明本次 deferred 是访问顺序限制，不是蓝色区域真的无法生成连续表面路径。
+这证明旧原型当时的 deferred 是访问顺序限制，不是蓝色区域真的无法生成路径。当前版本
+已用 cell 间抬刀转场取代这套连续贴面 connector，所以不会再出现该 A* deferred。
 
 ---
 
 ## 12. 【参考改进·未实现】几种改进思路分别解决什么问题
 
-以下是学习层面的方案比较，不代表应一次全部实现。
+以下是针对旧 A*/connector 原型的学习层面方案比较，不是当前 cell 抬刀实现的待办清单。
 
 ### 12.1 方案 A：从叶子 cell 开始
 
@@ -997,7 +1004,7 @@ cell_order_exhausted
 
 ### 12.6 与经典 Boustrophedon 和成熟开源实现的差异
 
-**【当前实现】** 当前原型固定从最早 scanline 所属 cell 开始，只从 `unvisited`
+**【旧原型·已停用】** 旧原型固定从最早 scanline 所属 cell 开始，只从 `unvisited`
 集合选择下一 cell，并按“相邻优先、connector 较短优先”做贪心选择。访问过的 cell
 不会再次作为过渡节点。因此 `1—0—2` 从中心 `0` 出发时，会被迫尝试不可 lift 的
 叶子到叶子连接。
@@ -1042,10 +1049,13 @@ ray-lift、曲面层连续、工具包络和机器人可达性约束，不能直
 ```text
 识别多个 runs/cells
 完成一个 cell 后再进入另一个 cell
-在有效二维域中规划 connector
-把 connector 逐点 ray-lift 到表面
-整个 patch 只保留全局首尾安全点
+cell 内保留完整光栅
+cell 之间由 exporter 沿局部法向抬刀
+两个离面端点之间使用 MoveJ 转场
 ```
+
+当前实现不建立 cell 邻接图，不运行贪心、A* 或 connector ray-lift。`line_id` 的 segment
+部分编码 cell 序号，`build_motion()` 据此为每个 cell 增加一次接近和离开。
 
 ### 13.3 Auto
 
@@ -1072,30 +1082,31 @@ else:
 
 推荐把本次现象表述为：
 
-> `1_2` 的加工域没有明显实体孔，但 patch 上边界有一个极小 exclude polygon 与 clip 相交；同时 selected STL 的 ray-lift 支撑域在最后一条相关扫描线上发生分裂。Auto 因任一条件都会升级到 hole-aware。最终失败来自 cell 图访问顺序和二维导航域未包含 liftable-surface 约束，而不是加工区域本身绝对无路。
+> `1_2` 的加工域没有明显实体孔，但 patch 上边界有一个极小 exclude polygon 与 clip
+> 正面积相交；同时 selected STL 的投影支撑域在某条扫描线上发生分裂。Auto 因任一条件
+> 都会升级到 hole-aware。当前实现把 runs 分成 cells，在 cell 间抬刀转场，不再因旧 A*
+> 访问顺序而 deferred。
 
 不要简化成以下任一种说法：
 
 ```text
 错误说法 1：因为有孔，所以无解。
-错误说法 2：A* 完全找不到二维路线。
+错误说法 2：当前算法正在运行 A*。
 错误说法 3：STL 上完全没有连续表面。
 错误说法 4：Optimal-Y 算法算不出最佳位置。
 ```
 
-更准确的因果链是：
+当前更准确的因果链是：
 
 ```mermaid
 flowchart TD
     A["上边界小 exclude polygon 与 clip 相交"] --> C["Auto 选择 hole-aware"]
     B["STL ray miss 使同一扫描线出现多个 run"] --> C
-    C --> D["建立 1—0—2 cell 图"]
-    D --> E["固定从中心 cell 0 开始"]
-    E --> F["贪心先选择较近的 cell 2"]
-    F --> G["剩余 2→1 的二维路线存在"]
-    G --> H["路线无法完整 ray-lift"]
-    H --> I["Path deferred"]
-    I --> J["没有 candidate，因此没有 Optimal-Y 结果"]
+    C --> D["建立 3 个 raster cells"]
+    D --> E["按扫描发现顺序完整加工每个 cell"]
+    E --> F["cell 结束后沿法向抬刀"]
+    F --> G["离面端点之间 MoveJ 转场"]
+    G --> H["下一个 cell 沿法向接近"]
 ```
 
 ---
@@ -1139,7 +1150,7 @@ line_triangle_hit()
 lift_uv()
 ```
 
-### 15.3 Cell 分解、贪心与 A*
+### 15.3 当前 Cell 分解与排序
 
 文件：
 
@@ -1153,14 +1164,12 @@ experimental_algorithms/hole_aware_raster.py
 RasterRun / RasterCell
 _make_runs()
 _build_cells()
-_free()
-_segment_is_free()
-_grid_route()
-_lift_connector()
+_ordered_cell_samples()
+projected_raster_cell_samples()
 hole_aware_raster_samples()
 ```
 
-### 15.4 导出与 deferred
+### 15.4 导出与 cell 间抬刀
 
 文件：
 
@@ -1173,7 +1182,9 @@ scripts/window_conf_export.py
 ```text
 plan_region_uv()
 plan_region_uv_hole_aware()
-PathResult.message
+build_motion()
+build_hole_aware_motion()
+rapid_text()
 ```
 
 ---
@@ -1232,9 +1243,9 @@ f = 80
 但沿 normal 无法命中 selected STL cells
 ```
 
-当前二维 `_free()` 会认为它可通行，但加入 liftable-surface mask 后应认为它不可通行。
+旧二维 `_free()` 会认为它可通行，但加入 liftable-surface mask 后应认为它不可通行。
 
-### 练习 5：分辨失败阶段
+### 练习 5：分辨旧原型失败阶段
 
 ```text
 A* 返回 route != None
@@ -1271,10 +1282,10 @@ _lift_connector(route) 返回 None
 
 ## 18. 最后总结
 
-记住下面五句话，就掌握了本次问题的核心：
+记住下面五句话，就掌握了当前实现和旧原型的边界：
 
 1. Hole-aware 不只处理肉眼可见的孔，也处理同一扫描线上的不连续 runs。
-2. Cell 图描述多个连续加工区域之间的连接关系，访问顺序会决定整体是否可行。
-3. 贪心算法只保证当前选择看起来最好，不保证后续一定有路。
-4. A* 只会遵守提供给它的导航域；导航域没有 STL liftability，A* 就可能找到无法落到三维表面的路线。
-5. 本次 `1_2` 不是绝对无路，`1 → 0 → 2` 可行；失败来自固定中心起点、不可重访和导航域定义的组合限制。
+2. 当前实现把 runs 分成 cells，按确定性顺序完整加工，每个 cell 之间抬刀转场。
+3. 当前实现不运行 cell 图贪心、A* 或 connector ray-lift。
+4. 贪心与 A* 章节解释 2026-07-13 旧原型为什么失败，不能当成当前代码调用链。
+5. Cell 抬刀只避免 TCP 在孔洞/缺口上贴面直穿，不等于机械臂、工具和环境已经避障。
