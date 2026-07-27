@@ -61,6 +61,19 @@
 - 检查是否回退到 VTK 几何裁剪 overlay。
 - 当前正确方案是原 STL + 透明 raster texture，不生成裁剪 mesh。
 
+## 分区后未划分 region 不再高亮
+
+- 手动 v2 只在 manifest 中记录被划分的源 region；`.rsp.json` 仍保留全部原始 regions。
+- 预览必须把被划分的源 region 替换为其 patch，并把没有 manifest record 的 regions 原样透传。
+- 例如 `1 -> 1_1` 时，三个源 regions 的最终显示标签应为 `1_1, 2, 3`，不能只显示 `1_1`。
+
+## 分区 texture 只在特定观察角度可见
+
+- 原因通常是 texture overlay 与原 STL 完全共面，透明渲染时发生 Z-buffer 深度竞争。
+- overlay mapper 必须启用 polygon offset，并设置非零的负向 relative polygon offset；
+  只开启 offset 模式但保留默认 `(0, 0)` 仍会随视角消失。
+- 不要通过移动 STL、修改 facet normal、开启单面剔除或重建裁剪 mesh 规避该问题。
+
 ## 分区边界出现密集三角形
 
 - 原因通常是按 cell centroid 整片上色或显示 triangle edges。

@@ -50,7 +50,9 @@ C:\Users\21093\Desktop\p1\.venv\Scripts\python.exe -m pytest tests -q
 3. 拖矩形，确认屏幕上始终横平竖直。
 4. 旋转 90° 后连续点击多边形并闭合，确认无“点击没反应”。
 5. 创建两个形状方向不同的 patch。
-6. 应用后检查模型仍完整，texture 边界无三角碎片，孔洞透明。
+6. 应用后检查模型仍完整，texture 边界无三角碎片，孔洞透明；当只划分多个源 region
+   中的一个时，确认该源 region 被 patch 标签替换，而所有未划分 region 仍保持高亮；
+   连续旋转三维预览，确认 texture 不随观察角度闪烁或消失。
 7. 点击快速预览，检查两个 patch 独立生成扫描方向。
 8. 检查 auto 快速预览：孔洞内没有蓝色路径，状态栏显示正确的 cell 抬刀数量和判定原因。
 9. 点击唯一“开始”运行 auto；如需对照，再从 CLI 强制 `--planner hole-aware`，确认输出

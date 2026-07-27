@@ -46,12 +46,82 @@ PALETTE = [
     (118, 174, 224),
     (196, 116, 164),
 ]
+RASTER_OVERLAY_OFFSET_FACTOR = -1.0
+RASTER_OVERLAY_OFFSET_UNITS = -1.0
 
 
 def manual_manifest_path_for(project_path: Path) -> Path:
     name = project_path.name
     stem = name[: -len(".rsp.json")] if name.endswith(".rsp.json") else project_path.stem
     return project_path.with_name(f"{stem}_manifest.json")
+
+
+def build_raster_preview_plan(manifest: dict, regions: list[set[int]]) -> dict | None:
+    """Replace partitioned source regions with patches and retain all others."""
+    if (
+        manifest.get("schema") != "base_casting_abb6700.manual_region_partition_manifest"
+        or int(manifest.get("version", 0)) != 2
+    ):
+        return None
+
+    records_by_source: dict[int, dict] = {}
+    for record in manifest.get("records", []):
+        source_region = int(record.get("original_region", 0))
+        chart = record.get("raster_chart")
+        patches = [patch for patch in record.get("patches", []) if patch.get("clip_polygon")]
+        if chart and patches and 0 < source_region <= len(regions):
+            records_by_source[source_region] = {"chart": chart, "patches": patches}
+    if not records_by_source:
+        return None
+
+    groups: list[dict] = []
+    passthrough: list[dict] = []
+    labels: list[str] = []
+    color_index = 0
+    for source_region, face_ids in enumerate(regions, 1):
+        record = records_by_source.get(source_region)
+        if record is None:
+            label = str(source_region)
+            passthrough.append(
+                {
+                    "source_region": source_region,
+                    "label": label,
+                    "face_ids": face_ids,
+                    "preview_color": PALETTE[color_index % len(PALETTE)],
+                }
+            )
+            labels.append(label)
+            color_index += 1
+            continue
+
+        colored_patches: list[dict] = []
+        for patch_index, patch in enumerate(record["patches"], 1):
+            colored_patch = dict(patch)
+            label = str(patch.get("label", f"{source_region}_{patch_index}"))
+            colored_patch["label"] = label
+            colored_patch["source_region"] = source_region
+            colored_patch["preview_color"] = PALETTE[color_index % len(PALETTE)]
+            colored_patches.append(colored_patch)
+            labels.append(label)
+            color_index += 1
+        groups.append(
+            {
+                "source_region": source_region,
+                "face_ids": face_ids,
+                "chart": record["chart"],
+                "patches": colored_patches,
+            }
+        )
+    return {"groups": groups, "passthrough": passthrough, "labels": labels}
+
+
+def configure_raster_overlay_mapper(mapper: vtkPolyDataMapper) -> None:
+    """Pull a textured coplanar overlay toward the camera in depth-buffer space."""
+    mapper.SetResolveCoincidentTopologyToPolygonOffset()
+    mapper.SetRelativeCoincidentTopologyPolygonOffsetParameters(
+        RASTER_OVERLAY_OFFSET_FACTOR,
+        RASTER_OVERLAY_OFFSET_UNITS,
+    )
 
 
 def point_in_polygon_xy(point: tuple[float, float], polygon: list[list[float]]) -> bool:
@@ -140,11 +210,16 @@ class RegionPreview(QWidget):
             reader.Update()
             polydata = reader.GetOutput()
             regions = [set(region) for region in project.selected_path_face_regions]
-            raster_groups = self._raster_groups(project_path, regions)
+            raster_plan = self._raster_preview_plan(project_path, regions)
             clip_patches = self._manual_clip_patches(project_path, regions)
-            if raster_groups:
-                self._apply_region_colors(polydata, [])
-                message = f"{project_path.name} | raster patches: {sum(len(group['patches']) for group in raster_groups)}"
+            if raster_plan:
+                self._apply_preview_entry_colors(polydata, raster_plan["passthrough"])
+                labels = ",".join(raster_plan["labels"][:6])
+                suffix = "..." if len(raster_plan["labels"]) > 6 else ""
+                message = (
+                    f"{project_path.name} | source regions: {len(regions)} | "
+                    f"display regions: {len(raster_plan['labels'])} ({labels}{suffix})"
+                )
             elif clip_patches:
                 self._apply_clip_patch_colors(polydata, clip_patches)
                 labels = ",".join(str(patch["label"]) for patch in clip_patches[:6])
@@ -154,8 +229,8 @@ class RegionPreview(QWidget):
                 self._apply_region_colors(polydata, regions)
                 message = f"{project_path.name} | regions: {len(regions)}"
             self._show_polydata(reader)
-            if raster_groups:
-                self._show_raster_textures(polydata, raster_groups)
+            if raster_plan:
+                self._show_raster_textures(polydata, raster_plan["groups"])
             self.set_message(message)
         except Exception as exc:
             self.set_message(f"预览加载失败: {exc}")
@@ -261,24 +336,15 @@ class RegionPreview(QWidget):
             f"obstacles={max(0, cell_count - len(support_cell_ids))}"
         )
 
-    def _raster_groups(self, project_path: Path, regions: list[set[int]]) -> list[dict]:
+    def _raster_preview_plan(self, project_path: Path, regions: list[set[int]]) -> dict | None:
         manifest_path = manual_manifest_path_for(project_path)
         if not manifest_path.exists():
-            return []
+            return None
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except Exception:
-            return []
-        if manifest.get("schema") != "base_casting_abb6700.manual_region_partition_manifest" or int(manifest.get("version", 0)) != 2:
-            return []
-        groups = []
-        for record in manifest.get("records", []):
-            source_region = int(record.get("original_region", 0))
-            chart = record.get("raster_chart")
-            patches = [patch for patch in record.get("patches", []) if patch.get("clip_polygon")]
-            if chart and patches and 0 < source_region <= len(regions):
-                groups.append({"face_ids": regions[source_region - 1], "chart": chart, "patches": patches})
-        return groups
+            return None
+        return build_raster_preview_plan(manifest, regions)
 
     def _show_raster_textures(self, polydata, groups: list[dict]) -> None:
         """Paint PySide partition masks and texture them onto the unchanged STL."""
@@ -306,8 +372,8 @@ class RegionPreview(QWidget):
                 )
 
             ordered = sorted(enumerate(patches), key=lambda item: 0 if item[1].get("exclude_polygons") else 1)
-            for patch_index, patch in ordered:
-                color = PALETTE[patch_index % len(PALETTE)]
+            for _patch_index, patch in ordered:
+                color = patch["preview_color"]
                 painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
                 painter.setPen(QPen(Qt.PenStyle.NoPen))
                 painter.setBrush(QBrush(QColor(*color, 210)))
@@ -332,7 +398,7 @@ class RegionPreview(QWidget):
             mapper = vtkPolyDataMapper()
             mapper.SetInputData(overlay)
             mapper.ScalarVisibilityOff()
-            mapper.SetResolveCoincidentTopologyToPolygonOffset()
+            configure_raster_overlay_mapper(mapper)
             actor = vtkActor()
             actor.SetMapper(mapper)
             actor.SetTexture(texture)
@@ -405,14 +471,21 @@ class RegionPreview(QWidget):
         return patches
 
     def _apply_region_colors(self, polydata, regions: list[set[int]]) -> None:
+        entries = [
+            {"face_ids": region, "preview_color": PALETTE[index % len(PALETTE)]}
+            for index, region in enumerate(regions)
+        ]
+        self._apply_preview_entry_colors(polydata, entries)
+
+    def _apply_preview_entry_colors(self, polydata, entries: list[dict]) -> None:
         cell_count = polydata.GetNumberOfCells()
         colors = vtkUnsignedCharArray()
         colors.SetNumberOfComponents(3)
         colors.SetName("RegionColors")
         face_to_color: dict[int, tuple[int, int, int]] = {}
-        for index, region in enumerate(regions):
-            color = PALETTE[index % len(PALETTE)]
-            for face_id in region:
+        for entry in entries:
+            color = entry["preview_color"]
+            for face_id in entry["face_ids"]:
                 face_to_color[int(face_id)] = color
         for cell_id in range(cell_count):
             colors.InsertNextTypedTuple(face_to_color.get(cell_id, DEFAULT_COLOR))
