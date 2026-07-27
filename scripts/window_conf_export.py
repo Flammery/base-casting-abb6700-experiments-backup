@@ -53,7 +53,12 @@ from hole_aware_raster import (  # noqa: F401 - runner API
     polygon_has_relevant_holes,
     projected_raster_cell_samples,
 )
-from region_selectors import parse_region_selectors, selector_matches, validate_selectors  # noqa: F401 - shared UI/runner API
+from region_selectors import (  # noqa: F401 - shared UI/runner API
+    canonical_region_selector,
+    parse_region_selectors,
+    selector_matches,
+    validate_selectors,
+)
 from robot_pose_avoidance import (  # noqa: F401 - experimental runner API
     DEFAULT_SAMPLE_LIMIT,
     DEFAULT_MIN_CLEARANCE_MM,
@@ -80,8 +85,10 @@ from support_surface_growth import (  # noqa: F401 - experimental runner/UI API
     build_obstacle_mesh_template,
     default_normal_heights_mm,
     grow_support_surface,
+    include_required_support_cells,
     load_avoidance_settings,
     path_seed_cell_ids,
+    support_surface_from_cells,
     write_avoidance_settings,
 )
 
@@ -259,6 +266,29 @@ def manual_clip_regions(project_path: Path, regions: list[set[int]]) -> list[dic
             continue
         clip_regions.append({"source_region": index, "label": str(index), "face_ids": region, "clip_polygon": None, "exclude_polygons": [], "raster_chart": None})
     return clip_regions
+
+
+def planning_region_is_patch(planning_region: dict) -> bool:
+    """Return whether support must grow beyond a derived planning patch."""
+
+    label = canonical_region_selector(str(planning_region["label"]))
+    source_label = str(int(planning_region["source_region"]))
+    return bool(planning_region.get("clip_polygon")) or label != source_label
+
+
+def support_for_planning_region(
+    polydata,
+    planning_region: dict,
+    seed_cell_ids: set[int] | frozenset[int],
+):
+    """Resolve support semantics shared by the settings UI and formal runner."""
+
+    region_cell_ids = set(int(value) for value in planning_region["face_ids"])
+    if not planning_region_is_patch(planning_region):
+        return support_surface_from_cells(polydata, region_cell_ids)
+    seeds = set(int(value) for value in seed_cell_ids) or region_cell_ids
+    grown = grow_support_surface(polydata, seeds)
+    return include_required_support_cells(polydata, grown, region_cell_ids)
 
 
 def split_discontinuous_raster_segments(samples, point_step: float):

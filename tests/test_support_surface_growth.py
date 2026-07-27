@@ -10,7 +10,11 @@ from vtkmodules.vtkCommonDataModel import vtkCellArray, vtkPolyData
 
 EXPERIMENT_DIR = Path(__file__).resolve().parents[1]
 ROOT = EXPERIMENT_DIR.parents[1]
-for folder in (ROOT / "src", EXPERIMENT_DIR / "experimental_algorithms"):
+for folder in (
+    ROOT / "src",
+    EXPERIMENT_DIR / "scripts",
+    EXPERIMENT_DIR / "experimental_algorithms",
+):
     if str(folder) not in sys.path:
         sys.path.insert(0, str(folder))
 
@@ -23,6 +27,7 @@ from support_surface_growth import (  # noqa: E402
     load_avoidance_settings,
     write_avoidance_settings,
 )
+from window_conf_export import support_for_planning_region  # noqa: E402
 
 
 def _floor_and_wall_mesh() -> vtkPolyData:
@@ -147,6 +152,36 @@ def test_obstacle_template_excludes_recovered_support_surface() -> None:
     assert template.support_cell_count == 2
     assert len(template.triangles_model) == 2
     assert all(all(point[0] == 10.0 for point in triangle) for triangle in template.triangles_model)
+
+
+def test_complete_region_uses_exact_selected_cells_as_support() -> None:
+    mesh = _floor_and_wall_mesh()
+    planning_region = {
+        "source_region": 1,
+        "label": "1",
+        "face_ids": {0, 2},
+        "clip_polygon": None,
+    }
+
+    support = support_for_planning_region(mesh, planning_region, {0})
+
+    assert support.seed_cell_ids == frozenset({0, 2})
+    assert support.support_cell_ids == frozenset({0, 2})
+
+
+def test_partition_patch_grows_support_and_always_keeps_source_cells() -> None:
+    mesh = _floor_and_wall_mesh()
+    planning_region = {
+        "source_region": 1,
+        "label": "1_1",
+        "face_ids": {0, 2},
+        "clip_polygon": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+    }
+
+    support = support_for_planning_region(mesh, planning_region, {0})
+
+    assert support.seed_cell_ids == frozenset({0})
+    assert support.support_cell_ids == frozenset({0, 1, 2})
 
 
 def test_uvn_volume_keeps_intersecting_near_wall_and_excludes_far_wall() -> None:

@@ -1,5 +1,24 @@
 # Decision Log
 
+## D024 Complete regions and derived patches use different support rules
+
+- Date: 2026-07-28
+- Status: Accepted for experiment
+- Problem: treating every avoidance selection as sparse path seeds can leave
+  machining cells outside the grown support. Those cells then enter the wall
+  mesh and appear red over the yellow machining area.
+- Decision: an unsplit planning region (`1`, `2`, `3`) uses all of its
+  `face_ids` directly as exact support. A derived patch (`1_1`, `3_2`, or any
+  raster clip) still grows support from its path-hit seeds, but all source
+  machining `face_ids` are forcibly unioned into the result.
+- Invariant: machining-region cells must never enter `obstacle_cell_ids`.
+  The settings dialog and configurable runner must call the same support
+  resolver; this is a collision-data rule, not only a preview-color rule.
+- Related code/tests: `scripts/window_conf_export.py`,
+  `scripts/optimal_y_score_configurable.py`,
+  `experimental_algorithms/support_surface_growth.py`,
+  `tests/test_support_surface_growth.py`.
+
 ## D023 Avoidance footprint uses one enclosing UV convex hull
 
 - Date: 2026-07-28

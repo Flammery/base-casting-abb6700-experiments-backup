@@ -425,8 +425,11 @@ def run_optimal_scan(
     auto_planner_reasons: dict[str, int] = {}
     avoidance_trial_rows: list[dict] = []
     avoidance_status_counts: dict[str, int] = {}
-    support_cache: dict[frozenset[int], object] = {}
-    obstacle_cache: dict[tuple[frozenset[int], str], tuple[object, object | None]] = {}
+    support_cache: dict[tuple[str, frozenset[int], frozenset[int]], object] = {}
+    obstacle_cache: dict[
+        tuple[tuple[str, frozenset[int], frozenset[int]], str],
+        tuple[object, object | None],
+    ] = {}
     volume_cell_bounds_cache: dict[tuple[float, ...], object] = {}
     support_summary_rows: list[dict] = []
     support_summary_keys: set[tuple[str, str, frozenset[int]]] = set()
@@ -493,12 +496,25 @@ def run_optimal_scan(
                         evaluation_stage = "support-surface"
                         try:
                             seed_cell_ids = frozenset(runner.base.path_seed_cell_ids(path))
-                            if seed_cell_ids not in support_cache:
-                                support = runner.base.grow_support_surface(polydata, seed_cell_ids)
-                                support_cache[seed_cell_ids] = support
-                            support = support_cache[seed_cell_ids]
                             region_label = str(planning_region["label"])
-                            obstacle_key = (seed_cell_ids, region_label)
+                            region_cell_ids = frozenset(
+                                int(value) for value in planning_region["face_ids"]
+                            )
+                            support_cache_key = (
+                                region_label,
+                                seed_cell_ids,
+                                region_cell_ids,
+                            )
+                            if support_cache_key not in support_cache:
+                                support_cache[support_cache_key] = (
+                                    runner.base.support_for_planning_region(
+                                        polydata,
+                                        planning_region,
+                                        seed_cell_ids,
+                                    )
+                                )
+                            support = support_cache[support_cache_key]
+                            obstacle_key = (support_cache_key, region_label)
                             if obstacle_key not in obstacle_cache:
                                 volume = None
                                 configured_record = (

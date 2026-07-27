@@ -227,7 +227,11 @@ class AvoidanceSettingsDialog(QDialog):
             for planning_region in matched:
                 label = str(planning_region["label"])
                 seed_ids = self._path_seed_ids(planning_region)
-                support = backend.grow_support_surface(self.polydata, seed_ids)
+                support = backend.support_for_planning_region(
+                    self.polydata,
+                    planning_region,
+                    seed_ids,
+                )
                 existing = existing_by_label.get(label)
                 frame = (
                     backend.AvoidanceVolumeFrame.from_dict(existing["frame"])

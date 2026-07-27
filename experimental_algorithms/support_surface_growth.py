@@ -232,6 +232,74 @@ def grow_support_surface(
     )
 
 
+def support_surface_from_cells(
+    polydata,
+    cell_ids: set[int] | frozenset[int],
+    settings: SupportGrowthSettings | None = None,
+) -> SupportSurfaceResult:
+    """Treat one complete selected machining region as exact support."""
+
+    settings = settings or SupportGrowthSettings()
+    cell_count = int(polydata.GetNumberOfCells())
+    support_ids = frozenset(
+        int(cell_id) for cell_id in cell_ids if 0 <= int(cell_id) < cell_count
+    )
+    if not support_ids:
+        raise ValueError("完整加工区域没有有效的支撑面 cell")
+    geometries = [_cell_geometry(polydata, cell_id) for cell_id in sorted(support_ids)]
+    reference_origin = _weighted_centroid(geometries)
+    reference_normal = _weighted_normal(geometries)
+    if length(reference_normal) <= 1e-12:
+        raise ValueError("完整加工区域无法计算稳定的支撑面法向")
+    return SupportSurfaceResult(
+        seed_cell_ids=support_ids,
+        support_cell_ids=support_ids,
+        reference_origin=reference_origin,
+        reference_normal=reference_normal,
+        max_normal_angle_deg=max(
+            _normal_angle_degrees(item.normal, reference_normal) for item in geometries
+        ),
+        max_plane_distance_mm=max(
+            _plane_distance(item.centroid, reference_origin, reference_normal)
+            for item in geometries
+        ),
+        settings=settings,
+    )
+
+
+def include_required_support_cells(
+    polydata,
+    support: SupportSurfaceResult,
+    required_cell_ids: set[int] | frozenset[int],
+) -> SupportSurfaceResult:
+    """Guarantee that every machining-region cell is excluded from walls."""
+
+    cell_count = int(polydata.GetNumberOfCells())
+    combined = support.support_cell_ids | frozenset(
+        int(cell_id)
+        for cell_id in required_cell_ids
+        if 0 <= int(cell_id) < cell_count
+    )
+    if combined == support.support_cell_ids:
+        return support
+    geometries = [_cell_geometry(polydata, cell_id) for cell_id in sorted(combined)]
+    return SupportSurfaceResult(
+        seed_cell_ids=support.seed_cell_ids,
+        support_cell_ids=combined,
+        reference_origin=support.reference_origin,
+        reference_normal=support.reference_normal,
+        max_normal_angle_deg=max(
+            _normal_angle_degrees(item.normal, support.reference_normal)
+            for item in geometries
+        ),
+        max_plane_distance_mm=max(
+            _plane_distance(item.centroid, support.reference_origin, support.reference_normal)
+            for item in geometries
+        ),
+        settings=support.settings,
+    )
+
+
 def build_obstacle_mesh_template(
     polydata,
     support: SupportSurfaceResult,

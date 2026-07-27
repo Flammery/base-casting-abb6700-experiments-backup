@@ -229,7 +229,11 @@ geometry, and swept motion remain outside this stage. Full rules are in
 
 Avoidance wall selection is configured separately from the project schema.
 The experiment UI resolves source-region/patch selectors and recovers the
-complete support. Every support vertex is projected into UV, and one
+complete support. An unsplit source region uses all selected machining
+`face_ids` directly as support. A derived patch grows beyond its path-hit
+seeds, but its source machining cells are always unioned into the support
+result. Consequently, a machining cell can never also be a wall candidate.
+Every support vertex is projected into UV, and one
 two-dimensional convex hull owns the avoidance boundary; STL triangle edges do
 not. The hull deliberately encloses holes, edge defects, narrow connections,
 small fragments, and concave bays, then extrudes in N for each final planning
