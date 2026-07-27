@@ -1,0 +1,22 @@
+{
+  "description": "Phase-1 base casting ABB 6700 windowed export scan defaults.",
+  "project_path": "project/test-0704-selected.rsp.json",
+  "model_z": 500.0,
+  "angles_deg": {
+    "start": 0,
+    "stop": 360,
+    "step": 15
+  },
+  "window_base_xy": {
+    "x": [1500.0, 2500.0],
+    "y": [-1050.0, 1050.0]
+  },
+  "feed_variants": ["long_side"],
+  "orientation_mode": "base_y_aligned",
+  "axis_mode": "region_boundary_uv_long_short",
+  "confdata": {
+    "base_y_negative": [-1, -1, 0, 1],
+    "base_y_nonnegative": [0, 0, -1, 1]
+  }
+}
+

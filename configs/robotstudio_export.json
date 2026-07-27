@@ -1,0 +1,11 @@
+{
+  "schema": "base_casting_abb6700.robotstudio_export_config",
+  "version": 1,
+  "robotstudio_exe": "D:/Software/Industrial Software/Mechanical engineering/Robot/RobotStudio_6.08.01/Bin64/RobotStudio.exe",
+  "sdk_bin": "D:/Software/Industrial Software/Mechanical engineering/Robot/RobotStudio_6.08.01/Bin64",
+  "template_station": "C:/Users/21093/Documents/RobotStudio/Solutions/风力发电底座/3600_0_440.rsstn",
+  "controller_task": "T_ROB1",
+  "calib_module_name": "CalibData",
+  "workpiece_component_name": "底座毛坯三维260414标红为打磨区域",
+  "path_module_prefix": "VALIDATE"
+}

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<RobotStudioAddIn xmlns="urn:abb-robotics-robotstudio-addin" autoLoad="true">
+  <ApplicationId>local.base-casting-abb6700.robotstudio-export</ApplicationId>
+  <DisplayName>ABB6700 Optimal Path Station Export</DisplayName>
+  <DisplayVersion>1.0.0</DisplayVersion>
+  <Description>Creates one RobotStudio 6.08 validation station per Optimal-Y region.</Description>
+  <AddInType>General</AddInType>
+  <Assembly>
+    <FileName>ABB6700.RobotStudioExport.dll</FileName>
+    <Entrypoint>ABB6700.RobotStudioExport.AddInMainClass.AddInMain</Entrypoint>
+  </Assembly>
+  <Dependencies>None</Dependencies>
+  <Platform>Any</Platform>
+  <MinimumHostVersion>6.08.8307</MinimumHostVersion>
+</RobotStudioAddIn>
