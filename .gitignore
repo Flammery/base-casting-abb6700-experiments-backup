@@ -8,6 +8,10 @@ __pycache__/
 results/*
 !results/.gitkeep
 
+# Local model selections and partition manifests
+inputs/*
+!inputs/.gitkeep
+
 # Local temporary files
 tmp/
 *.log
