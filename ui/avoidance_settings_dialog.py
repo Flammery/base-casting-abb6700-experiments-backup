@@ -102,7 +102,7 @@ class AvoidanceSettingsDialog(QDialog):
         normal_row.addStretch(1)
 
         self.hint = QLabel(
-            "黄色=所选打磨面，绿色=支撑面，红色=范围内墙体，灰色透明体=UVN覆盖范围。"
+            "黄色=所选打磨面，绿色=支撑面，红色=范围内墙体，灰色透明体=支撑面轮廓拉伸范围。"
             "U/V 的 30% 表示最终总宽度扩大到原来的 130%。"
         )
         self.hint.setWordWrap(True)
@@ -410,6 +410,7 @@ class AvoidanceSettingsDialog(QDialog):
                 obstacle_cell_ids=set(volume.obstacle_cell_ids),
                 selected_face_ids=set(region["face_ids"]),
                 volume_vertices=volume.vertices_model,
+                volume_faces=volume.volume_faces,
                 clip_polygon=region.get("clip_polygon"),
                 exclude_polygons=region.get("exclude_polygons"),
                 raster_chart=region.get("raster_chart"),

@@ -1,17 +1,40 @@
 # Decision Log
 
+## D021 Avoidance volume follows the projected support footprint
+
+- Date: 2026-07-27
+- Status: Accepted for experiment; supersedes the rectangular-footprint part
+  of D020
+- Background: the D020 UV min/max rectangle can cover large empty areas when
+  the support is curved, concave, or oblique in its UV chart.
+- Decision: keep the existing complete recovered support. Project all of its
+  cells to the configured UV plane, scale that actual triangulated footprint
+  independently about its UV centre, then close and extrude it between N- and
+  N+. Curved support is deliberately projected before extrusion in this stage.
+- Intersection: only non-support workpiece cells inside or crossing the closed
+  footprint prism enter the wall mesh. A cell inside the footprint bounding
+  rectangle but outside the footprint itself is excluded.
+- UI/persistence: render the same irregular closed prism in translucent gray.
+  U/V percentages, N+/N- values, selectors, and the sidecar workflow remain
+  unchanged. Newly written sidecars use version 2; version 1 settings remain
+  readable and are evaluated with the new footprint rule.
+- Not changed: support growth, lower-face filtering, TCP-roll candidates,
+  IK/FK, collision/clearance acceptance, or the 6000-triangle wall budget.
+- Related code/tests: `experimental_algorithms/support_surface_growth.py`,
+  `ui/region_viewer.py`, `tests/test_support_surface_growth.py`.
+
 ## D020 Avoidance walls use operator-configured UVN volumes
 
 - Date: 2026-07-27
-- Status: Accepted for experiment; supersedes the global-obstacle sampling part
-  of D016
+- Status: Superseded in footprint geometry by D021; still supersedes the
+  global-obstacle sampling part of D016
 - Background: D016 removed the recovered support but still treated the rest of
   the complete workpiece as obstacle candidates. A support-near 800 mm box only
   changed sampling priority, so distant geometry remained involved while dense
   nearby walls could still be reduced by the 6000-triangle budget.
 - Decision: replace the main-panel avoidance text field with an Avoidance
   Settings dialog. Resolve selectors to final planning labels and persist one
-  model-coordinate UVN rectangular volume per label. U/V are independently
+  model-coordinate UVN volume per label. U/V are independently
   adjustable total-width expansion percentages; N+/N- are independent
   millimetre heights. Only non-support cells intersecting the volume enter the
   experimental wall mesh.

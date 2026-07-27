@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 
@@ -81,6 +82,52 @@ def _floor_near_and_far_wall_mesh() -> vtkPolyData:
     return mesh
 
 
+def _concave_support_and_walls_mesh() -> vtkPolyData:
+    coordinates = [
+        (0.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (2.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (1.0, 1.0, 0.0),
+        (2.0, 1.0, 0.0),
+        (0.0, 2.0, 0.0),
+        (1.0, 2.0, 0.0),
+        # Wall inside the missing corner of the L-shaped support bounds.
+        (1.4, 1.4, 0.0),
+        (1.8, 1.4, 0.0),
+        (1.4, 1.4, 1.0),
+        (1.8, 1.4, 1.0),
+        # Wall inside the lower arm of the actual support footprint.
+        (1.4, 0.5, 0.0),
+        (1.8, 0.5, 0.0),
+        (1.4, 0.5, 1.0),
+        (1.8, 0.5, 1.0),
+    ]
+    points = vtkPoints()
+    for point in coordinates:
+        points.InsertNextPoint(*point)
+    cells = vtkCellArray()
+    for triangle in (
+        (0, 1, 4),
+        (0, 4, 3),
+        (1, 2, 5),
+        (1, 5, 4),
+        (3, 4, 7),
+        (3, 7, 6),
+        (8, 9, 11),
+        (8, 11, 10),
+        (12, 13, 15),
+        (12, 15, 14),
+    ):
+        cells.InsertNextCell(3)
+        for point_id in triangle:
+            cells.InsertCellPoint(point_id)
+    mesh = vtkPolyData()
+    mesh.SetPoints(points)
+    mesh.SetPolys(cells)
+    return mesh
+
+
 def test_seeded_growth_recovers_floor_and_stops_at_wall() -> None:
     mesh = _floor_and_wall_mesh()
 
@@ -152,6 +199,34 @@ def test_uvn_volume_percentage_is_total_width_expansion() -> None:
     assert volume.obstacle_cell_ids == frozenset({2, 3, 4, 5})
 
 
+def test_uvn_volume_uses_projected_support_shape_instead_of_its_rectangle() -> None:
+    mesh = _concave_support_and_walls_mesh()
+    support = grow_support_surface(mesh, {0})
+
+    volume = build_avoidance_volume(
+        mesh,
+        support,
+        AvoidanceVolumeSettings(
+            u_expand_percent=0.0,
+            v_expand_percent=0.0,
+            n_plus_mm=1.0,
+            n_minus_mm=0.0,
+        ),
+        raster_chart={
+            "origin": [0.0, 0.0, 0.0],
+            "u_axis": [1.0, 0.0, 0.0],
+            "v_axis": [0.0, 1.0, 0.0],
+            "normal": [0.0, 0.0, 1.0],
+        },
+    )
+
+    assert support.support_cell_ids == frozenset(range(6))
+    assert volume.obstacle_cell_ids == frozenset({8, 9})
+    assert volume.outside_cell_count == 2
+    assert len(volume.vertices_model) == 16
+    assert volume.as_dict()["volume_shape"] == "support-footprint-prism"
+
+
 def test_avoidance_settings_sidecar_round_trip(tmp_path: Path) -> None:
     project_path = tmp_path / "sample.rsp.json"
     settings_path = avoidance_settings_path_for(project_path)
@@ -177,5 +252,11 @@ def test_avoidance_settings_sidecar_round_trip(tmp_path: Path) -> None:
     payload = load_avoidance_settings(settings_path)
 
     assert settings_path.name == "sample_avoidance.json"
+    assert payload["version"] == 2
     assert payload["selectors"] == ["1_2"]
     assert payload["regions"] == records
+
+    legacy_payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    legacy_payload["version"] = 1
+    settings_path.write_text(json.dumps(legacy_payload), encoding="utf-8")
+    assert load_avoidance_settings(settings_path)["version"] == 1

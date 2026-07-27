@@ -372,6 +372,7 @@ class RegionPreview(QWidget):
         obstacle_cell_ids: set[int],
         selected_face_ids: set[int],
         volume_vertices: list[tuple[float, float, float]] | tuple[tuple[float, float, float], ...],
+        volume_faces: list[tuple[int, ...]] | tuple[tuple[int, ...], ...],
         clip_polygon: list[list[float]] | None = None,
         exclude_polygons: list[list[list[float]]] | None = None,
         raster_chart: dict | None = None,
@@ -405,19 +406,12 @@ class RegionPreview(QWidget):
         polydata.GetCellData().SetScalars(colors)
         polydata.Modified()
 
-        if len(volume_vertices) == 8:
+        if volume_vertices and volume_faces:
             points = vtkPoints()
             for point in volume_vertices:
                 points.InsertNextPoint(*point)
             faces = vtkCellArray()
-            for face in (
-                (0, 1, 3, 2),
-                (4, 6, 7, 5),
-                (0, 4, 5, 1),
-                (2, 3, 7, 6),
-                (0, 2, 6, 4),
-                (1, 5, 7, 3),
-            ):
+            for face in volume_faces:
                 faces.InsertNextCell(len(face))
                 for point_id in face:
                     faces.InsertCellPoint(point_id)
@@ -432,9 +426,7 @@ class RegionPreview(QWidget):
             actor.ForceTranslucentOn()
             actor.GetProperty().SetColor(0.66, 0.69, 0.73)
             actor.GetProperty().SetOpacity(0.14)
-            actor.GetProperty().EdgeVisibilityOn()
-            actor.GetProperty().SetEdgeColor(0.82, 0.85, 0.90)
-            actor.GetProperty().SetLineWidth(1.5)
+            actor.GetProperty().EdgeVisibilityOff()
             self.renderer.AddActor(actor)
             self._volume_actor = actor
             self._texture_data.extend([volume_mesh, mapper])

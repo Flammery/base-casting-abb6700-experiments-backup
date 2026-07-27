@@ -75,7 +75,7 @@ latest_partitioned_manifest.json
 
 两个文件必须成对使用。复制或更名项目文件时必须同步复制或更名 manifest。
 
-## 避障范围 sidecar Version 1
+## 避障范围 sidecar Version 2
 
 避障墙体范围不写入 `.rsp.json` 或分区 manifest，而是保存在同名
 `*_avoidance.json`：
@@ -83,7 +83,7 @@ latest_partitioned_manifest.json
 ```json
 {
   "schema": "base_casting_abb6700.avoidance_volume_settings",
-  "version": 1,
+  "version": 2,
   "input_project": "latest_partitioned.rsp.json",
   "selectors": ["1_2", "12"],
   "regions": [
@@ -114,11 +114,15 @@ latest_partitioned_manifest.json
 - `regions` 按最终 planning label 保存独立设置；裸 source region 解析出的多个
   patches 必须各有一条记录。
 - `frame` 使用模型坐标，并保持右手 UVN 关系。
-- U/V 百分比表示最终总宽度的增加量；`30` 表示最终宽度为原支撑面宽度的
-  `130%`。
+- 完整支撑面先投影到 `frame` 的 UV 平面，曲面也采用该规则；投影后的三角化真实
+  轮廓围绕 UV 中心扩大并沿 N 拉伸，不使用 UV 最小/最大包围矩形作为底面。
+- U/V 百分比表示对应方向最终总跨度的增加量；`30` 表示最终跨度为原支撑面投影
+  跨度的 `130%`。
 - N+/N- 是从支撑面 N 上下界继续扩展的毫米高度。
 - `preview` 只保存诊断范围和数量，正式运行仍根据当前网格重新计算 cell 集合。
 - `input_project` 必须与正式运行的项目一致；重新分区后应重新应用避障设置。
+- Version 1 的参数仍可读取，但运行时也按 Version 2 的支撑面轮廓规则重新计算；
+  下一次点击“应用”会写成 Version 2。
 
 文件命名示例：
 
