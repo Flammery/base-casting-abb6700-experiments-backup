@@ -126,15 +126,17 @@ texture 显示；STL 不会被切割或重建。
 exclude 仍必须与 `raster_chart + clip_polygon` 成套存在；原始 region 在普通投影发现
 split-scanline 后直接复用投影扫描轴建立 cells。完整限制见 `HOLE_AWARE_PLANNER.md`。
 
-### 指定区域的 ABB/RobotStudio 验证标记
+### 避障设置
 
-第一行“避障区域”可填 `1-1,1-2`（指定 patch）或 `1,2,3`（指定源 region）。裸
-region 会覆盖其派生 patch；空输入表示不添加验证标记。当前阶段不运行实验数值 IK/FK，
-也不会因为内部 IK 不收敛而删除有效路径。命中的路径保持 `base_y` 和工具 local-Z roll
-`0°`，IK、构型和真实干涉统一交给 ABB/RobotStudio 验证。
+第一行点击“避障设置”打开三维弹窗。区域可填 `1-1,1-2`（指定 patch）或
+`1,2,3`（指定源 region）；裸 region 会解析为其全部最终 patches，每个 patch 独立
+设置。U/V 分别输入支撑面总宽度的扩大百分比，`30%` 表示最终宽度为 `130%`；
+N+/N- 输入沿局部法向两侧的毫米高度。点击“应用”写入同名
+`*_avoidance.json`，不会修改 `.rsp.json` 或分区 manifest。
 
-`robot_avoidance_trials.csv` 只保留安装 X/Y/Z、转台角度、region、工具转角和干涉状态；
-未经过 ABB/RobotStudio 验证时，干涉状态必须明确写为“未评估”。
+弹窗中黄色为打磨面、绿色为恢复支撑面、红色为 UVN 范围内墙体、半透明灰色体为
+覆盖范围。范围外模型不进入本轮墙体网格，不按朝上/朝下过滤。正式 runner 仍执行
+现有的姿态库、数值 IK/FK、抽样碰撞和间隙筛查；本次墙体范围功能没有改变这些规则。
 
 转台角度不再使用固定预设。实验 UI 的“转台”输入框可填写单个角度 `270`，也可填写
 多个角度 `0,180` 或 `0,30,180`；逗号分隔、按输入顺序运行，负角度和 360 会规范到

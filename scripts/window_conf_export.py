@@ -65,10 +65,24 @@ from robot_pose_avoidance import (  # noqa: F401 - experimental runner API
 )
 from robot_config_override import load_robot_config_override  # noqa: F401 - shared UI/runner API
 from support_surface_growth import (  # noqa: F401 - experimental runner/UI API
+    AVOIDANCE_VOLUME_SCHEMA,
+    AVOIDANCE_VOLUME_VERSION,
+    DEFAULT_U_EXPAND_PERCENT,
+    DEFAULT_V_EXPAND_PERCENT,
+    AvoidanceVolumeFrame,
+    AvoidanceVolumeSettings,
     SupportGrowthSettings,
+    avoidance_cell_bounds_uvn,
+    avoidance_setting_for_label,
+    avoidance_settings_path_for,
+    avoidance_volume_frame,
+    build_avoidance_volume,
     build_obstacle_mesh_template,
+    default_normal_heights_mm,
     grow_support_surface,
+    load_avoidance_settings,
     path_seed_cell_ids,
+    write_avoidance_settings,
 )
 
 

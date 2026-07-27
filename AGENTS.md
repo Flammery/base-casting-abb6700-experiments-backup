@@ -109,9 +109,11 @@ patch.
 
 - `experimental_algorithms/support_surface_growth.py`
   Recovers an avoidance patch's full near-planar support from final path
-  `face_id` seeds. It removes only that recovered support from the experimental
-  wall-distance mesh and prioritizes nearby obstacle triangles. Keep growth
-  diagnostics and the yellow/green/red preview whenever thresholds change.
+  `face_id` seeds. The Avoidance Settings dialog persists one model-coordinate
+  UVN volume per resolved planning label; only non-support cells intersecting
+  that volume enter the experimental wall mesh. Keep the sidecar separate from
+  `.rsp.json`, and preserve the yellow machining / green support / red wall /
+  translucent gray volume preview whenever thresholds or bounds change.
 
 - `scripts/robotstudio_package.py`
   Packages selected Optimal-Y RAPID into one job per region/patch. It separates

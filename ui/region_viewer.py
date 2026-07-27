@@ -170,6 +170,7 @@ class RegionPreview(QWidget):
         self.setMinimumHeight(360)
         self._actor: vtkActor | None = None
         self._path_actor: vtkActor | None = None
+        self._volume_actor: vtkActor | None = None
         self._texture_actors: list[vtkActor] = []
         self._texture_data: list[object] = []
         self._reader = None
@@ -199,6 +200,7 @@ class RegionPreview(QWidget):
 
     def load_project(self, project_path: Path) -> None:
         self.clear_paths()
+        self.clear_avoidance_volume()
         if not project_path.exists():
             self.set_message(f"输入不存在: {project_path}")
             return
@@ -263,6 +265,16 @@ class RegionPreview(QWidget):
             self.renderer.RemoveActor(self._path_actor)
             self._path_actor = None
             self.vtk_widget.GetRenderWindow().Render()
+
+    def clear_avoidance_volume(self) -> None:
+        if self._volume_actor is not None:
+            self.renderer.RemoveActor(self._volume_actor)
+            self._volume_actor = None
+        for actor in self._texture_actors:
+            self.renderer.RemoveActor(actor)
+        self._texture_actors.clear()
+        self._texture_data.clear()
+        self.vtk_widget.GetRenderWindow().Render()
 
     def show_paths(self, paths: list[object]) -> None:
         """Overlay model-coordinate raster runs without joining holes or lines."""
@@ -334,6 +346,103 @@ class RegionPreview(QWidget):
         self.set_message(
             f"support preview: seeds={len(seed_cell_ids)} / support={len(support_cell_ids)} / "
             f"obstacles={max(0, cell_count - len(support_cell_ids))}"
+        )
+
+    def show_avoidance_volume(
+        self,
+        *,
+        support_cell_ids: set[int],
+        obstacle_cell_ids: set[int],
+        selected_face_ids: set[int],
+        volume_vertices: list[tuple[float, float, float]] | tuple[tuple[float, float, float], ...],
+        clip_polygon: list[list[float]] | None = None,
+        exclude_polygons: list[list[list[float]]] | None = None,
+        raster_chart: dict | None = None,
+        label: str = "",
+    ) -> None:
+        """Show selected machining area, support, local walls, and UVN volume."""
+
+        if self._reader is None:
+            return
+        self.clear_avoidance_volume()
+        polydata = self._reader.GetOutput()
+        cell_count = int(polydata.GetNumberOfCells())
+        colors = vtkUnsignedCharArray()
+        colors.SetNumberOfComponents(3)
+        colors.SetName("AvoidanceVolumeColors")
+        support_color = (48, 188, 126)
+        selected_color = (250, 190, 42)
+        obstacle_color = (174, 70, 70)
+        outside_color = (128, 134, 142)
+        use_texture_selection = bool(raster_chart and clip_polygon)
+        for cell_id in range(cell_count):
+            if not use_texture_selection and cell_id in selected_face_ids:
+                color = selected_color
+            elif cell_id in support_cell_ids:
+                color = support_color
+            elif cell_id in obstacle_cell_ids:
+                color = obstacle_color
+            else:
+                color = outside_color
+            colors.InsertNextTypedTuple(color)
+        polydata.GetCellData().SetScalars(colors)
+        polydata.Modified()
+
+        if len(volume_vertices) == 8:
+            points = vtkPoints()
+            for point in volume_vertices:
+                points.InsertNextPoint(*point)
+            faces = vtkCellArray()
+            for face in (
+                (0, 1, 3, 2),
+                (4, 6, 7, 5),
+                (0, 4, 5, 1),
+                (2, 3, 7, 6),
+                (0, 2, 6, 4),
+                (1, 5, 7, 3),
+            ):
+                faces.InsertNextCell(len(face))
+                for point_id in face:
+                    faces.InsertCellPoint(point_id)
+            volume_mesh = vtkPolyData()
+            volume_mesh.SetPoints(points)
+            volume_mesh.SetPolys(faces)
+            mapper = vtkPolyDataMapper()
+            mapper.SetInputData(volume_mesh)
+            mapper.ScalarVisibilityOff()
+            actor = vtkActor()
+            actor.SetMapper(mapper)
+            actor.ForceTranslucentOn()
+            actor.GetProperty().SetColor(0.66, 0.69, 0.73)
+            actor.GetProperty().SetOpacity(0.14)
+            actor.GetProperty().EdgeVisibilityOn()
+            actor.GetProperty().SetEdgeColor(0.82, 0.85, 0.90)
+            actor.GetProperty().SetLineWidth(1.5)
+            self.renderer.AddActor(actor)
+            self._volume_actor = actor
+            self._texture_data.extend([volume_mesh, mapper])
+
+        if use_texture_selection:
+            self._show_raster_textures(
+                polydata,
+                [
+                    {
+                        "face_ids": selected_face_ids,
+                        "chart": raster_chart,
+                        "patches": [
+                            {
+                                "clip_polygon": clip_polygon,
+                                "exclude_polygons": exclude_polygons or [],
+                                "preview_color": selected_color,
+                            }
+                        ],
+                    }
+                ],
+            )
+        self.vtk_widget.GetRenderWindow().Render()
+        self.set_message(
+            f"avoidance {label}: selected={len(selected_face_ids)} / "
+            f"support={len(support_cell_ids)} / walls={len(obstacle_cell_ids)}"
         )
 
     def _raster_preview_plan(self, project_path: Path, regions: list[set[int]]) -> dict | None:

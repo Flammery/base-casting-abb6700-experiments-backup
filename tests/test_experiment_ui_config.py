@@ -179,6 +179,28 @@ def test_runner_command_adds_robot_configuration_when_selected(tmp_path) -> None
     assert command[command.index("--robot-config") + 1] == str(config_path)
 
 
+def test_runner_command_adds_avoidance_volume_settings_when_selected(tmp_path) -> None:
+    module = _load_ui_config_module()
+    settings_path = tmp_path / "input_avoidance.json"
+    settings_path.write_text("{}", encoding="utf-8")
+
+    command = module.runner_command(
+        "python",
+        tmp_path / "input.rsp.json",
+        "3700",
+        "0",
+        "440",
+        "270",
+        "1500,2500;-1050,1050",
+        "6",
+        "auto",
+        "1-2",
+        avoidance_settings_path=settings_path,
+    )
+
+    assert command[command.index("--avoidance-settings") + 1] == str(settings_path)
+
+
 def test_configurable_runner_defaults_to_auto_planner() -> None:
     module = _load_runner_module()
 

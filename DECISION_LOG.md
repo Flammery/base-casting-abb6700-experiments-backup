@@ -1,5 +1,31 @@
 # Decision Log
 
+## D020 Avoidance walls use operator-configured UVN volumes
+
+- Date: 2026-07-27
+- Status: Accepted for experiment; supersedes the global-obstacle sampling part
+  of D016
+- Background: D016 removed the recovered support but still treated the rest of
+  the complete workpiece as obstacle candidates. A support-near 800 mm box only
+  changed sampling priority, so distant geometry remained involved while dense
+  nearby walls could still be reduced by the 6000-triangle budget.
+- Decision: replace the main-panel avoidance text field with an Avoidance
+  Settings dialog. Resolve selectors to final planning labels and persist one
+  model-coordinate UVN rectangular volume per label. U/V are independently
+  adjustable total-width expansion percentages; N+/N- are independent
+  millimetre heights. Only non-support cells intersecting the volume enter the
+  experimental wall mesh.
+- UI: show the machining area in yellow, recovered support in green, included
+  walls in red, and the UVN volume as a highly transparent gray solid. The
+  dialog has Preview, Apply, and Cancel; it does not provide Apply-to-all.
+- Persistence: write a versioned sibling `*_avoidance.json` sidecar and do not
+  modify `.rsp.json` or the partition manifest.
+- Rejected for this stage: filtering lower/downward faces, changing the TCP-roll
+  library, changing IK/FK, or changing collision/clearance acceptance.
+- Related code: `ui/avoidance_settings_dialog.py`, `ui/region_viewer.py`,
+  `experimental_algorithms/support_surface_growth.py`,
+  `scripts/optimal_y_score_configurable.py`.
+
 ## D019 Successful experiment runs open their result directory
 
 - Date: 2026-07-22

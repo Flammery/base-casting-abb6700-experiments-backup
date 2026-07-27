@@ -74,3 +74,56 @@ latest_partitioned_manifest.json
 ```
 
 两个文件必须成对使用。复制或更名项目文件时必须同步复制或更名 manifest。
+
+## 避障范围 sidecar Version 1
+
+避障墙体范围不写入 `.rsp.json` 或分区 manifest，而是保存在同名
+`*_avoidance.json`：
+
+```json
+{
+  "schema": "base_casting_abb6700.avoidance_volume_settings",
+  "version": 1,
+  "input_project": "latest_partitioned.rsp.json",
+  "selectors": ["1_2", "12"],
+  "regions": [
+    {
+      "region_label": "1_2",
+      "source_region": 1,
+      "frame": {
+        "origin_model": [0, 0, 0],
+        "u_axis_model": [1, 0, 0],
+        "v_axis_model": [0, 1, 0],
+        "n_axis_model": [0, 0, 1]
+      },
+      "settings": {
+        "u_expand_percent": 30,
+        "v_expand_percent": 30,
+        "n_plus_mm": 500,
+        "n_minus_mm": 200
+      },
+      "preview": {}
+    }
+  ]
+}
+```
+
+字段规则：
+
+- `selectors` 保存用户输入规范化后的 source-region/patch 选择。
+- `regions` 按最终 planning label 保存独立设置；裸 source region 解析出的多个
+  patches 必须各有一条记录。
+- `frame` 使用模型坐标，并保持右手 UVN 关系。
+- U/V 百分比表示最终总宽度的增加量；`30` 表示最终宽度为原支撑面宽度的
+  `130%`。
+- N+/N- 是从支撑面 N 上下界继续扩展的毫米高度。
+- `preview` 只保存诊断范围和数量，正式运行仍根据当前网格重新计算 cell 集合。
+- `input_project` 必须与正式运行的项目一致；重新分区后应重新应用避障设置。
+
+文件命名示例：
+
+```text
+latest_partitioned.rsp.json
+latest_partitioned_manifest.json
+latest_partitioned_avoidance.json
+```

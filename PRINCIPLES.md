@@ -225,6 +225,25 @@ real-cell safety certificate; tool, environment, self-collision, complete robot
 geometry, and swept motion remain outside this stage. Full rules are in
 `docs/ROBOT_ARM_AVOIDANCE_WORKFLOW.md`.
 
+### UVN obstacle volumes
+
+Avoidance wall selection is configured separately from the project schema.
+The experiment UI resolves source-region/patch selectors, recovers the complete
+near-planar support, and creates one model-coordinate UVN rectangular volume
+per final planning label. U and V expansion are percentages of the complete
+support width; a value of 30 means a final width of 130 percent. N+ and N- are
+independent millimetre heights.
+
+Every non-support mesh cell whose UVN bounds overlap the volume is a wall
+candidate. Cells outside the volume are excluded from this experiment's wall
+mesh. Do not classify or discard cells by upward/downward normal. Manual-v2
+machining boundaries remain raster textures; cell colors do not replace the
+authoritative clip polygon.
+
+Settings are stored in a versioned `*_avoidance.json` sidecar. The `.rsp.json`
+schema remains unchanged. Existing TCP-roll, IK/FK, clearance, and optimal
+selection behavior is intentionally unchanged by this wall-selection stage.
+
 ## Y-Position Selection
 
 For dual-robot rail scans, first export feasible candidate paths with the

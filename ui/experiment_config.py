@@ -189,6 +189,7 @@ def runner_command(
     planner: str = "legacy",
     avoidance_regions: str = "",
     robot_config_path: Path | None = None,
+    avoidance_settings_path: Path | None = None,
 ) -> list[str]:
     scan_axis_for_coordinates(model_x, model_y, model_z)
     boundary_margin = parse_boundary_margin_text(boundary_margin_text)
@@ -210,6 +211,11 @@ def runner_command(
     avoidance_selectors = parse_region_selectors(avoidance_regions)
     if avoidance_selectors:
         command.extend(["--avoidance-regions", ",".join(avoidance_selectors)])
+    if avoidance_settings_path is not None:
+        settings_path = Path(avoidance_settings_path)
+        if not settings_path.is_file():
+            raise ValueError(f"避障设置文件不存在: {settings_path}")
+        command.extend(["--avoidance-settings", str(settings_path)])
     if robot_config_path is not None:
         config_path = Path(robot_config_path)
         if not config_path.is_file():

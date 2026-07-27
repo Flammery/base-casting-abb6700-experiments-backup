@@ -49,6 +49,7 @@ from manual_partition_dialog import (  # noqa: E402
     ManualPartitionDialog,
     manual_manifest_path_for,
 )
+from avoidance_settings_dialog import AvoidanceSettingsDialog  # noqa: E402
 from region_viewer import RegionPreview  # noqa: E402
 import window_conf_export as path_preview_backend  # noqa: E402
 from robotstudio_package import build_package, queue_manifest  # noqa: E402
@@ -67,6 +68,8 @@ class ExperimentPanel(QWidget):
         self._robotstudio_result_dir: Path | None = None
         self._robot_config_override = None
         self.robot_config_path: Path | None = None
+        self.avoidance_settings_path: Path | None = None
+        self.avoidance_selectors: list[str] = []
 
         self.input_path = QLineEdit(str(DEFAULT_INPUT))
         self.input_path.setMinimumWidth(360)
@@ -83,9 +86,9 @@ class ExperimentPanel(QWidget):
         # not exposed as the long editable path that previously occupied row 1.
         self.partition_output_path = DEFAULT_PARTITIONED
         self.apply_partition_button = QPushButton("区域划分")
-        self.avoidance_regions = QLineEdit("")
-        self.avoidance_regions.setPlaceholderText("1-1,1-2 或 1,2,3")
-        self.avoidance_regions.setFixedWidth(170)
+        self.avoidance_settings_button = QPushButton("避障设置")
+        self.avoidance_settings_label = QLabel("未配置")
+        self.avoidance_settings_label.setToolTip("设置避障 region/patch 和 UVN 墙体覆盖范围")
 
         self.window_limits = QLineEdit("1500,2500;-1050,1050")
         self.window_limits.setPlaceholderText("空=不限; 1000,2000;-1050,1050")
@@ -124,8 +127,8 @@ class ExperimentPanel(QWidget):
         first_row.addWidget(QLabel("分区"))
         first_row.addWidget(self.partition_regions)
         first_row.addWidget(self.apply_partition_button)
-        first_row.addWidget(QLabel("避障区域"))
-        first_row.addWidget(self.avoidance_regions)
+        first_row.addWidget(self.avoidance_settings_button)
+        first_row.addWidget(self.avoidance_settings_label)
         first_row.addStretch(1)
 
         second_row = QHBoxLayout()
@@ -161,6 +164,7 @@ class ExperimentPanel(QWidget):
         self.input_button.clicked.connect(self.choose_input)
         self.robot_config_button.clicked.connect(self.choose_robot_config)
         self.apply_partition_button.clicked.connect(self.apply_partition)
+        self.avoidance_settings_button.clicked.connect(self.configure_avoidance)
         self.preview_path_button.clicked.connect(self.preview_paths)
         self.start_button.clicked.connect(self.start_run)
         self.robotstudio_button.clicked.connect(self.export_to_robotstudio)
@@ -227,6 +231,7 @@ class ExperimentPanel(QWidget):
             self._current_region_count = 0
             self.region_count.setText("regions: 文件不存在")
             self.status.setText(f"当前输入不存在: {path}")
+            self._clear_avoidance_settings()
             return
         try:
             count = read_region_count(path)
@@ -234,11 +239,62 @@ class ExperimentPanel(QWidget):
             self._current_region_count = 0
             self.region_count.setText("regions: 读取失败")
             self.status.setText(f"输入读取失败: {exc}")
+            self._clear_avoidance_settings()
             return
         self._current_region_count = count
         self.region_count.setText(f"regions: {count}")
         self.status.setText(f"当前输入: {path}")
         self.preview.load_project(path)
+        self._refresh_avoidance_settings(path)
+
+    def _clear_avoidance_settings(self) -> None:
+        self.avoidance_settings_path = None
+        self.avoidance_selectors = []
+        self.avoidance_settings_label.setText("未配置")
+        self.avoidance_settings_label.setToolTip("设置避障 region/patch 和 UVN 墙体覆盖范围")
+
+    def _refresh_avoidance_settings(self, project_path: Path) -> None:
+        settings_path = path_preview_backend.avoidance_settings_path_for(project_path)
+        if not settings_path.exists():
+            self._clear_avoidance_settings()
+            return
+        try:
+            payload = path_preview_backend.load_avoidance_settings(settings_path)
+            if Path(str(payload.get("input_project", ""))).resolve() != project_path.resolve():
+                raise ValueError("设置对应的输入项目与当前项目不一致")
+            selectors = [str(value) for value in payload.get("selectors", [])]
+            labels = [str(record.get("region_label", "")).replace("_", "-") for record in payload.get("regions", [])]
+        except Exception as exc:
+            self._clear_avoidance_settings()
+            self.avoidance_settings_label.setText("配置无效")
+            self.avoidance_settings_label.setToolTip(str(exc))
+            return
+        self.avoidance_settings_path = settings_path
+        self.avoidance_selectors = selectors
+        self.avoidance_settings_label.setText(
+            f"已配置 {len(labels)} 个区域：" + ",".join(labels[:4]) + ("..." if len(labels) > 4 else "")
+        )
+        self.avoidance_settings_label.setToolTip(str(settings_path))
+
+    def configure_avoidance(self) -> None:
+        if self._process is not None:
+            QMessageBox.information(self, "正在运行", "请等待当前实验结束后再修改避障设置。")
+            return
+        project_path = Path(self.input_path.text())
+        if not project_path.exists():
+            QMessageBox.warning(self, "避障设置", f"当前输入不存在: {project_path}")
+            return
+        try:
+            dialog = AvoidanceSettingsDialog(project_path, parent=self)
+        except Exception as exc:
+            QMessageBox.critical(self, "避障设置加载失败", str(exc))
+            return
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._refresh_avoidance_settings(project_path)
+        self.status.setText(
+            f"避障设置已应用: {self.avoidance_settings_label.text()} | {self.avoidance_settings_path}"
+        )
 
     @staticmethod
     def _first_coordinate(text: str, fallback: str) -> float:
@@ -262,7 +318,7 @@ class ExperimentPanel(QWidget):
             if not regions:
                 raise ValueError("当前项目没有已选择的加工面。")
             planning_regions = path_preview_backend.manual_clip_regions(project_path, regions)
-            avoidance_selectors = path_preview_backend.parse_region_selectors(self.avoidance_regions.text())
+            avoidance_selectors = list(self.avoidance_selectors)
             path_preview_backend.validate_selectors(avoidance_selectors, planning_regions)
             avoidance_selector_set = set(avoidance_selectors)
             importer = path_preview_backend.CadImportService().import_model(project.workpiece.file_path)
@@ -412,8 +468,9 @@ class ExperimentPanel(QWidget):
                 self.window_limits.text(),
                 self.boundary_margin.text(),
                 planner,
-                self.avoidance_regions.text(),
+                ",".join(self.avoidance_selectors),
                 self.robot_config_path,
+                self.avoidance_settings_path,
             )
         except Exception as exc:
             self.status.setText(f"实验参数错误: {exc}")
@@ -428,7 +485,7 @@ class ExperimentPanel(QWidget):
         self.preview_path_button.setEnabled(False)
         self.robotstudio_button.setEnabled(False)
         self.robot_config_button.setEnabled(False)
-        self.avoidance_regions.setEnabled(False)
+        self.avoidance_settings_button.setEnabled(False)
         self.turntable_angles.setEnabled(False)
         self._runner_output = ""
         self._process_kind = kind
@@ -460,7 +517,7 @@ class ExperimentPanel(QWidget):
         self.preview_path_button.setEnabled(True)
         self.robotstudio_button.setEnabled(True)
         self.robot_config_button.setEnabled(True)
-        self.avoidance_regions.setEnabled(True)
+        self.avoidance_settings_button.setEnabled(True)
         self.turntable_angles.setEnabled(True)
         if exit_code != 0:
             tail = "\n".join(self._runner_output.splitlines()[-8:])

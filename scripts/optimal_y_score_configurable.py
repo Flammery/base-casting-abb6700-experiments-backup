@@ -158,6 +158,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated source regions or patches, e.g. 1,2 or 1-1,1-2.",
     )
     parser.add_argument(
+        "--avoidance-settings",
+        type=Path,
+        help="UVN obstacle-volume sidecar created by the experiment UI.",
+    )
+    parser.add_argument(
         "--avoidance-min-clearance",
         type=float,
         default=runner.base.DEFAULT_MIN_CLEARANCE_MM,
@@ -363,6 +368,20 @@ def run_optimal_scan(
         raise RuntimeError(f"No selected_path_face_regions in {args.project}")
     planning_regions = runner.base.manual_clip_regions(args.project, regions)
     avoidance_raw = str(getattr(args, "avoidance_regions", "") or "")
+    avoidance_settings_payload = None
+    avoidance_settings_path = getattr(args, "avoidance_settings", None)
+    if avoidance_settings_path is not None:
+        avoidance_settings_payload = runner.base.load_avoidance_settings(avoidance_settings_path)
+        configured_project = Path(str(avoidance_settings_payload.get("input_project", "")))
+        if configured_project.resolve() != Path(args.project).resolve():
+            raise ValueError(
+                f"avoidance settings input_project does not match --project: "
+                f"{configured_project} != {args.project}"
+            )
+        if not avoidance_raw:
+            avoidance_raw = ",".join(
+                str(value) for value in avoidance_settings_payload.get("selectors", [])
+            )
     avoidance_selectors = runner.base.parse_region_selectors(avoidance_raw)
     runner.base.validate_selectors(avoidance_selectors, planning_regions)
     avoidance_selector_set = set(avoidance_selectors)
@@ -406,7 +425,9 @@ def run_optimal_scan(
     auto_planner_reasons: dict[str, int] = {}
     avoidance_trial_rows: list[dict] = []
     avoidance_status_counts: dict[str, int] = {}
-    support_cache: dict[frozenset[int], tuple[object, object]] = {}
+    support_cache: dict[frozenset[int], object] = {}
+    obstacle_cache: dict[tuple[frozenset[int], str], tuple[object, object | None]] = {}
+    volume_cell_bounds_cache: dict[tuple[float, ...], object] = {}
     support_summary_rows: list[dict] = []
     support_summary_keys: set[tuple[str, str, frozenset[int]]] = set()
     saved_snapshot_paths: set[Path] = set()
@@ -474,9 +495,82 @@ def run_optimal_scan(
                             seed_cell_ids = frozenset(runner.base.path_seed_cell_ids(path))
                             if seed_cell_ids not in support_cache:
                                 support = runner.base.grow_support_surface(polydata, seed_cell_ids)
-                                obstacle_template = runner.base.build_obstacle_mesh_template(polydata, support)
-                                support_cache[seed_cell_ids] = (support, obstacle_template)
-                            support, obstacle_template = support_cache[seed_cell_ids]
+                                support_cache[seed_cell_ids] = support
+                            support = support_cache[seed_cell_ids]
+                            region_label = str(planning_region["label"])
+                            obstacle_key = (seed_cell_ids, region_label)
+                            if obstacle_key not in obstacle_cache:
+                                volume = None
+                                configured_record = (
+                                    runner.base.avoidance_setting_for_label(
+                                        avoidance_settings_payload,
+                                        region_label,
+                                    )
+                                    if avoidance_settings_payload is not None
+                                    else None
+                                )
+                                if avoidance_settings_payload is not None and configured_record is None:
+                                    raise ValueError(
+                                        f"避障设置缺少规划区域 {region_label}；请重新打开“避障设置”并应用"
+                                    )
+                                if configured_record is not None:
+                                    raw_volume_settings = configured_record.get("settings") or {}
+                                    volume_settings = runner.base.AvoidanceVolumeSettings(
+                                        u_expand_percent=float(
+                                            raw_volume_settings.get(
+                                                "u_expand_percent",
+                                                runner.base.DEFAULT_U_EXPAND_PERCENT,
+                                            )
+                                        ),
+                                        v_expand_percent=float(
+                                            raw_volume_settings.get(
+                                                "v_expand_percent",
+                                                runner.base.DEFAULT_V_EXPAND_PERCENT,
+                                            )
+                                        ),
+                                        n_plus_mm=float(raw_volume_settings.get("n_plus_mm", 0.0)),
+                                        n_minus_mm=float(raw_volume_settings.get("n_minus_mm", 0.0)),
+                                    )
+                                    volume_frame = runner.base.AvoidanceVolumeFrame.from_dict(
+                                        configured_record["frame"]
+                                    )
+                                    frame_key = tuple(
+                                        round(float(value), 9)
+                                        for vector in (
+                                            volume_frame.origin,
+                                            volume_frame.u_axis,
+                                            volume_frame.v_axis,
+                                            volume_frame.n_axis,
+                                        )
+                                        for value in vector
+                                    )
+                                    if frame_key not in volume_cell_bounds_cache:
+                                        volume_cell_bounds_cache[frame_key] = (
+                                            runner.base.avoidance_cell_bounds_uvn(
+                                                polydata,
+                                                volume_frame,
+                                            )
+                                        )
+                                    volume = runner.base.build_avoidance_volume(
+                                        polydata,
+                                        support,
+                                        volume_settings,
+                                        raster_chart=planning_region.get("raster_chart"),
+                                        frame=volume_frame,
+                                        cell_bounds_uvn=volume_cell_bounds_cache[frame_key],
+                                    )
+                                    obstacle_template = runner.base.build_obstacle_mesh_template(
+                                        polydata,
+                                        support,
+                                        volume.obstacle_cell_ids,
+                                    )
+                                else:
+                                    obstacle_template = runner.base.build_obstacle_mesh_template(
+                                        polydata,
+                                        support,
+                                    )
+                                obstacle_cache[obstacle_key] = (obstacle_template, volume)
+                            obstacle_template, volume = obstacle_cache[obstacle_key]
                             support_key = (str(planning_region["label"]), variant_name, seed_cell_ids)
                             if support_key not in support_summary_keys:
                                 support_payload = support.as_dict(int(polydata.GetNumberOfCells()))
@@ -488,6 +582,14 @@ def run_optimal_scan(
                                         "priority_obstacle_cell_count": obstacle_template.priority_obstacle_cell_count,
                                     }
                                 )
+                                if volume is not None:
+                                    support_payload["obstacle_cell_count"] = len(
+                                        volume.obstacle_cell_ids
+                                    )
+                                    support_payload["outside_volume_cell_count"] = (
+                                        volume.outside_cell_count
+                                    )
+                                    support_payload["avoidance_volume"] = volume.as_dict()
                                 support_summary_rows.append(support_payload)
                                 support_summary_keys.add(support_key)
                             collision_mesh = obstacle_template.to_collision_mesh(placement)
@@ -661,6 +763,9 @@ def run_optimal_scan(
         "avoidance_requested": avoidance_raw,
         "avoidance_selectors": avoidance_selectors,
         "avoidance_resolved_labels": resolved_avoidance_labels,
+        "avoidance_settings_path": (
+            str(avoidance_settings_path) if avoidance_settings_path is not None else None
+        ),
         "avoidance_pose_roll_degrees": list(runner.base.POSE_ROLL_DEGREES),
         "avoidance_required_clearance_mm": float(args.avoidance_min_clearance),
         "avoidance_collision_model": {
