@@ -373,6 +373,12 @@ class RegionPreview(QWidget):
         selected_face_ids: set[int],
         volume_vertices: list[tuple[float, float, float]] | tuple[tuple[float, float, float], ...],
         volume_faces: list[tuple[int, ...]] | tuple[tuple[int, ...], ...],
+        footprint_loops_uv: (
+            list[list[tuple[float, float]]]
+            | tuple[tuple[tuple[float, float], ...], ...]
+            | None
+        ) = None,
+        avoidance_chart: dict | None = None,
         clip_polygon: list[list[float]] | None = None,
         exclude_polygons: list[list[list[float]]] | None = None,
         raster_chart: dict | None = None,
@@ -393,12 +399,13 @@ class RegionPreview(QWidget):
         obstacle_color = (174, 70, 70)
         outside_color = (128, 134, 142)
         use_texture_selection = bool(raster_chart and clip_polygon)
+        use_texture_obstacles = bool(avoidance_chart and footprint_loops_uv)
         for cell_id in range(cell_count):
             if not use_texture_selection and cell_id in selected_face_ids:
                 color = selected_color
             elif cell_id in support_cell_ids:
                 color = support_color
-            elif cell_id in obstacle_cell_ids:
+            elif not use_texture_obstacles and cell_id in obstacle_cell_ids:
                 color = obstacle_color
             else:
                 color = outside_color
@@ -431,23 +438,38 @@ class RegionPreview(QWidget):
             self._volume_actor = actor
             self._texture_data.extend([volume_mesh, mapper])
 
-        if use_texture_selection:
-            self._show_raster_textures(
-                polydata,
-                [
-                    {
-                        "face_ids": selected_face_ids,
-                        "chart": raster_chart,
-                        "patches": [
-                            {
-                                "clip_polygon": clip_polygon,
-                                "exclude_polygons": exclude_polygons or [],
-                                "preview_color": selected_color,
-                            }
-                        ],
-                    }
-                ],
+        texture_groups: list[dict] = []
+        if use_texture_obstacles:
+            texture_groups.append(
+                {
+                    "face_ids": obstacle_cell_ids,
+                    "chart": avoidance_chart,
+                    "patches": [
+                        {
+                            "clip_polygon": loop,
+                            "exclude_polygons": [],
+                            "preview_color": obstacle_color,
+                        }
+                        for loop in footprint_loops_uv or []
+                    ],
+                }
             )
+        if use_texture_selection:
+            texture_groups.append(
+                {
+                    "face_ids": selected_face_ids,
+                    "chart": raster_chart,
+                    "patches": [
+                        {
+                            "clip_polygon": clip_polygon,
+                            "exclude_polygons": exclude_polygons or [],
+                            "preview_color": selected_color,
+                        }
+                    ],
+                }
+            )
+        if texture_groups:
+            self._show_raster_textures(polydata, texture_groups)
         self.vtk_widget.GetRenderWindow().Render()
         self.set_message(
             f"avoidance {label}: selected={len(selected_face_ids)} / "

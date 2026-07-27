@@ -132,6 +132,9 @@ class AvoidanceVolumeResult:
     volume_bounds_uvn: tuple[Vector3, Vector3]
     volume_vertices_model: tuple[Vector3, ...]
     volume_faces: tuple[tuple[int, ...], ...]
+    footprint_loops_uv: tuple[tuple[tuple[float, float], ...], ...]
+    projected_point_count: int
+    hull_vertex_count: int
     obstacle_cell_ids: frozenset[int]
     outside_cell_count: int
 
@@ -145,9 +148,12 @@ class AvoidanceVolumeResult:
             "settings": asdict(self.settings),
             "support_bounds_uvn": [list(self.support_bounds_uvn[0]), list(self.support_bounds_uvn[1])],
             "volume_bounds_uvn": [list(self.volume_bounds_uvn[0]), list(self.volume_bounds_uvn[1])],
-            "volume_shape": "support-footprint-prism",
+            "volume_shape": "support-convex-hull-prism",
             "volume_vertex_count": len(self.volume_vertices_model),
             "volume_face_count": len(self.volume_faces),
+            "footprint_loop_count": len(self.footprint_loops_uv),
+            "projected_point_count": self.projected_point_count,
+            "hull_vertex_count": self.hull_vertex_count,
             "obstacle_cell_count": len(self.obstacle_cell_ids),
             "outside_cell_count": self.outside_cell_count,
         }
@@ -353,7 +359,14 @@ def build_avoidance_volume(
             raise ValueError(
                 f"避障 UVN cell bounds 形状错误: {bounds_array.shape}; 期望 {(cell_count, 6)}"
             )
-    volume_mesh, volume_vertices, volume_faces = _support_footprint_prism(
+    (
+        volume_mesh,
+        volume_vertices,
+        volume_faces,
+        footprint_loops_uv,
+        projected_point_count,
+        hull_vertex_count,
+    ) = _support_footprint_prism(
         polydata,
         support.support_cell_ids,
         frame,
@@ -398,6 +411,9 @@ def build_avoidance_volume(
         volume_bounds_uvn=volume_bounds,
         volume_vertices_model=volume_vertices,
         volume_faces=volume_faces,
+        footprint_loops_uv=footprint_loops_uv,
+        projected_point_count=projected_point_count,
+        hull_vertex_count=hull_vertex_count,
         obstacle_cell_ids=obstacles,
         outside_cell_count=outside,
     )
@@ -663,58 +679,46 @@ def _support_footprint_prism(
     v_center: float,
     u_scale: float,
     v_scale: float,
-) -> tuple[vtkPolyData, tuple[Vector3, ...], tuple[tuple[int, ...], ...]]:
-    """Return a closed prism made from the projected, scaled support topology."""
+) -> tuple[
+    vtkPolyData,
+    tuple[Vector3, ...],
+    tuple[tuple[int, ...], ...],
+    tuple[tuple[tuple[float, float], ...], ...],
+    int,
+    int,
+]:
+    """Cover the complete projected support with one convex UV prism."""
 
     if not support_cell_ids:
-        raise ValueError("支撑面为空，无法构建轮廓避障范围")
+        raise ValueError("支撑面为空，无法构建 UV 避障范围")
 
-    support_cells: list[tuple[int, ...]] = []
-    point_ids: set[int] = set()
-    edge_counts: dict[tuple[int, int], tuple[int, tuple[int, int]]] = {}
-    for cell_id in sorted(support_cell_ids):
-        cell = polydata.GetCell(int(cell_id))
-        cell_point_ids = tuple(
-            int(cell.GetPointId(index)) for index in range(int(cell.GetNumberOfPoints()))
+    hull_uv, projected_point_count = _support_uv_convex_hull(
+        polydata,
+        support_cell_ids,
+        frame,
+    )
+    scaled_hull = [
+        (
+            u_center + (u_value - u_center) * u_scale,
+            v_center + (v_value - v_center) * v_scale,
         )
-        if len(cell_point_ids) < 3:
-            continue
-        support_cells.append(cell_point_ids)
-        point_ids.update(cell_point_ids)
-        for index, first in enumerate(cell_point_ids):
-            second = cell_point_ids[(index + 1) % len(cell_point_ids)]
-            key = (min(first, second), max(first, second))
-            count, oriented = edge_counts.get(key, (0, (first, second)))
-            edge_counts[key] = (count + 1, oriented)
-    if not support_cells or not point_ids:
-        raise ValueError("支撑面没有可投影的多边形单元")
+        for u_value, v_value in hull_uv
+    ]
 
-    ordered_point_ids = sorted(point_ids)
-    local_index = {point_id: index for index, point_id in enumerate(ordered_point_ids)}
     n_lower = float(volume_bounds_uvn[0][2])
     n_upper = float(volume_bounds_uvn[1][2])
     vertices: list[Vector3] = []
     for n_value in (n_lower, n_upper):
-        for point_id in ordered_point_ids:
-            u_value, v_value, _n_value = _point_to_uvn(
-                tuple(float(value) for value in polydata.GetPoint(point_id)),
-                frame,
-            )
-            scaled_u = u_center + (u_value - u_center) * u_scale
-            scaled_v = v_center + (v_value - v_center) * v_scale
-            vertices.append(_point_from_uvn(frame, scaled_u, scaled_v, n_value))
+        for u_value, v_value in scaled_hull:
+            vertices.append(_point_from_uvn(frame, u_value, v_value, n_value))
 
-    layer_size = len(ordered_point_ids)
-    faces: list[tuple[int, ...]] = []
-    for cell_point_ids in support_cells:
-        bottom = tuple(local_index[point_id] for point_id in reversed(cell_point_ids))
-        top = tuple(local_index[point_id] + layer_size for point_id in cell_point_ids)
-        faces.extend((bottom, top))
-    for count, (first, second) in edge_counts.values():
-        if count != 1:
-            continue
-        first_index = local_index[first]
-        second_index = local_index[second]
+    layer_size = len(scaled_hull)
+    faces: list[tuple[int, ...]] = [
+        tuple(reversed(range(layer_size))),
+        tuple(range(layer_size, layer_size * 2)),
+    ]
+    for first_index in range(layer_size):
+        second_index = (first_index + 1) % layer_size
         faces.append(
             (
                 first_index,
@@ -748,7 +752,61 @@ def _support_footprint_prism(
     normals.Update()
     closed_mesh = vtkPolyData()
     closed_mesh.DeepCopy(normals.GetOutput())
-    return closed_mesh, tuple(vertices), tuple(faces)
+    return (
+        closed_mesh,
+        tuple(vertices),
+        tuple(faces),
+        (tuple(scaled_hull),),
+        projected_point_count,
+        len(scaled_hull),
+    )
+
+
+def _support_uv_convex_hull(
+    polydata,
+    support_cell_ids: frozenset[int],
+    frame: AvoidanceVolumeFrame,
+) -> tuple[list[tuple[float, float]], int]:
+    """Return the 2D convex hull of all projected support vertices."""
+
+    projected_points: list[tuple[float, float]] = []
+    for cell_id in sorted(support_cell_ids):
+        cell = polydata.GetCell(int(cell_id))
+        projected_points.extend(
+            _point_to_uvn(
+                tuple(float(value) for value in polydata.GetPoint(cell.GetPointId(index))),
+                frame,
+            )[:2]
+            for index in range(int(cell.GetNumberOfPoints()))
+        )
+    unique_points = sorted(set(projected_points))
+    if len(unique_points) < 3:
+        raise ValueError("支撑面投影点不足，无法构建二维凸包")
+
+    def turn(
+        first: tuple[float, float],
+        second: tuple[float, float],
+        third: tuple[float, float],
+    ) -> float:
+        return (
+            (second[0] - first[0]) * (third[1] - first[1])
+            - (second[1] - first[1]) * (third[0] - first[0])
+        )
+
+    lower: list[tuple[float, float]] = []
+    for point in unique_points:
+        while len(lower) >= 2 and turn(lower[-2], lower[-1], point) <= 1e-12:
+            lower.pop()
+        lower.append(point)
+    upper: list[tuple[float, float]] = []
+    for point in reversed(unique_points):
+        while len(upper) >= 2 and turn(upper[-2], upper[-1], point) <= 1e-12:
+            upper.pop()
+        upper.append(point)
+    hull = lower[:-1] + upper[:-1]
+    if len(hull) < 3:
+        raise ValueError("支撑面投影点共线，无法构建二维凸包")
+    return hull, len(unique_points)
 
 
 def _cells_intersecting_closed_volume(

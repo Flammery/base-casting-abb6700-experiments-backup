@@ -199,7 +199,7 @@ def test_uvn_volume_percentage_is_total_width_expansion() -> None:
     assert volume.obstacle_cell_ids == frozenset({2, 3, 4, 5})
 
 
-def test_uvn_volume_uses_projected_support_shape_instead_of_its_rectangle() -> None:
+def test_uvn_volume_convex_hull_encloses_concave_support_bay() -> None:
     mesh = _concave_support_and_walls_mesh()
     support = grow_support_surface(mesh, {0})
 
@@ -221,10 +221,14 @@ def test_uvn_volume_uses_projected_support_shape_instead_of_its_rectangle() -> N
     )
 
     assert support.support_cell_ids == frozenset(range(6))
-    assert volume.obstacle_cell_ids == frozenset({8, 9})
-    assert volume.outside_cell_count == 2
-    assert len(volume.vertices_model) == 16
-    assert volume.as_dict()["volume_shape"] == "support-footprint-prism"
+    assert volume.obstacle_cell_ids == frozenset({6, 7, 8, 9})
+    assert volume.outside_cell_count == 0
+    assert len(volume.footprint_loops_uv) == 1
+    assert volume.hull_vertex_count == 5
+    assert len(volume.vertices_model) == 10
+    assert len(volume.volume_faces) == 7
+    assert all(len(face) >= 4 for face in volume.volume_faces)
+    assert volume.as_dict()["volume_shape"] == "support-convex-hull-prism"
 
 
 def test_avoidance_settings_sidecar_round_trip(tmp_path: Path) -> None:

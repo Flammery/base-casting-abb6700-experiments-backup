@@ -1,5 +1,39 @@
 # Decision Log
 
+## D023 Avoidance footprint uses one enclosing UV convex hull
+
+- Date: 2026-07-28
+- Status: Accepted for experiment; supersedes D022 and the concave-footprint
+  part of D021
+- Decision: project every vertex of the complete recovered support into UV and
+  compute one two-dimensional convex hull. Scale this hull about the support UV
+  centre, then use it as the bottom/top polygon of the N prism.
+- Consequence: holes, edge defects, narrow connections, disconnected slivers,
+  and concave bays are deliberately enclosed. The volume can therefore be
+  larger than the exact support silhouette, but it has one stable outer
+  boundary and cannot inherit STL triangle fragments.
+- Preview/intersection: the same convex polygon controls the translucent volume,
+  red wall texture clipping, and closed-volume wall-cell intersection.
+- Related code/tests: `experimental_algorithms/support_surface_growth.py`,
+  `ui/region_viewer.py`, `tests/test_support_surface_growth.py`.
+
+## D022 Projected avoidance footprints are repaired before expansion
+
+- Date: 2026-07-27
+- Status: Superseded by D023
+- Decision: project support cells into one UV raster mask; STL triangle edges
+  do not become avoidance boundaries. Fill enclosed mask holes, apply a small
+  two-dimensional closing operation to shallow edge defects, discard tiny
+  disconnected raster fragments, trace only the repaired outer mask contours,
+  and then scale/extrude those contours in N.
+- Preview: red walls are clipped by the same UV mask texture. Intersecting STL
+  cells remain collision data, but an entire triangle must not be colored red
+  merely because one corner crosses the footprint boundary.
+- UI: do not add another operator parameter. Preview diagnostics report the
+  number of filled holes and the automatic boundary-repair tolerance.
+- Not changed: support growth, U/V/N inputs, wall collision processing, or pose
+  selection.
+
 ## D021 Avoidance volume follows the projected support footprint
 
 - Date: 2026-07-27

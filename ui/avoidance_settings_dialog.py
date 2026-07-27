@@ -411,6 +411,13 @@ class AvoidanceSettingsDialog(QDialog):
                 selected_face_ids=set(region["face_ids"]),
                 volume_vertices=volume.vertices_model,
                 volume_faces=volume.volume_faces,
+                footprint_loops_uv=volume.footprint_loops_uv,
+                avoidance_chart={
+                    "origin": list(volume.frame.origin),
+                    "u_axis": list(volume.frame.u_axis),
+                    "v_axis": list(volume.frame.v_axis),
+                    "normal": list(volume.frame.n_axis),
+                },
                 clip_polygon=region.get("clip_polygon"),
                 exclude_polygons=region.get("exclude_polygons"),
                 raster_chart=region.get("raster_chart"),
@@ -419,6 +426,7 @@ class AvoidanceSettingsDialog(QDialog):
             self.status.setText(
                 f"区域 {str(region['label']).replace('_', '-')}："
                 f"支撑面 {len(entry['support'].support_cell_ids)} cells，"
+                f"UV 凸包 {volume.hull_vertex_count} 点，"
                 f"范围内墙体 {len(volume.obstacle_cell_ids)} cells，"
                 f"范围外 {volume.outside_cell_count} cells"
             )

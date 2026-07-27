@@ -228,19 +228,22 @@ geometry, and swept motion remain outside this stage. Full rules are in
 ### UVN obstacle volumes
 
 Avoidance wall selection is configured separately from the project schema.
-The experiment UI resolves source-region/patch selectors, recovers the complete
-support, projects its actual triangulated footprint to the configured UV plane,
-and extrudes that footprint in N for each final planning label. Curved support
-is projected before extrusion in this stage. U and V independently scale the
-projected footprint about its UV centre; a value of 30 means a final span of
-130 percent. N+ and N- are independent millimetre heights.
+The experiment UI resolves source-region/patch selectors and recovers the
+complete support. Every support vertex is projected into UV, and one
+two-dimensional convex hull owns the avoidance boundary; STL triangle edges do
+not. The hull deliberately encloses holes, edge defects, narrow connections,
+small fragments, and concave bays, then extrudes in N for each final planning
+label. Curved support is projected before the hull is built. U and V
+independently scale the hull about the support UV centre; a value of 30 means a
+final span of 130 percent. N+ and N- are independent millimetre heights.
 
 Every non-support mesh cell inside or crossing the closed footprint prism is a
 wall candidate. The UV bounding rectangle is only diagnostic and cannot select
 cells outside the projected support shape. Cells outside the volume are
 excluded from this experiment's wall mesh. Do not classify or discard cells by
-upward/downward normal. Manual-v2 machining boundaries remain raster textures;
-cell colors do not replace the authoritative clip polygon.
+upward/downward normal. Manual-v2 machining boundaries and avoidance-preview
+boundaries remain raster textures; whole-cell colors do not replace their
+authoritative UV masks.
 
 Settings are stored in a versioned `*_avoidance.json` sidecar. The `.rsp.json`
 schema remains unchanged. Existing TCP-roll, IK/FK, clearance, and optimal
