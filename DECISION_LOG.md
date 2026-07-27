@@ -16,10 +16,14 @@
   millimetre heights. Only non-support cells intersecting the volume enter the
   experimental wall mesh.
 - UI: show the machining area in yellow, recovered support in green, included
-  walls in red, and the UVN volume as a highly transparent gray solid. The
-  dialog has Preview, Apply, and Cancel; it does not provide Apply-to-all.
+  walls in red, and the UVN volume as a highly transparent gray solid. Parsing
+  automatically displays the result. The dialog has Clear Selection, a
+  Show/Hide toggle, Apply, and Cancel; it does not provide Apply-to-all. Clear
+  Selection only resets the temporary dialog state and does not delete a saved
+  sidecar.
 - Persistence: write a versioned sibling `*_avoidance.json` sidecar and do not
-  modify `.rsp.json` or the partition manifest.
+  modify `.rsp.json` or the partition manifest. Show the exact sidecar path in
+  the dialog.
 - Rejected for this stage: filtering lower/downward faces, changing the TCP-roll
   library, changing IK/FK, or changing collision/clearance acceptance.
 - Related code: `ui/avoidance_settings_dialog.py`, `ui/region_viewer.py`,

@@ -44,6 +44,7 @@ def test_parse_avoidance_regions_supports_regions_and_patch_spellings() -> None:
     module = _load_ui_config_module()
 
     assert module.parse_region_selectors("1-1, 1_2, 2.3, 4, 1-1") == ["1_1", "1_2", "2_3", "4"]
+    assert module.parse_region_selectors("1-1，2、3-2；4") == ["1_1", "2", "3_2", "4"]
     assert module.parse_region_selectors("") == []
 
 

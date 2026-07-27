@@ -4,11 +4,10 @@ from dataclasses import asdict
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -52,6 +51,7 @@ class AvoidanceSettingsDialog(QDialog):
         self.polydata = self._load_polydata()
         self._entries: list[dict] = []
         self._current_index = -1
+        self._preview_visible = False
         self._existing_payload = self._read_existing_payload()
 
         self.preview = RegionPreview()
@@ -59,7 +59,7 @@ class AvoidanceSettingsDialog(QDialog):
         self.preview.load_project(self.project_path)
 
         self.selector_edit = QLineEdit(",".join(self._existing_payload.get("selectors", [])))
-        self.selector_edit.setPlaceholderText("例如 1-2,12")
+        self.selector_edit.setPlaceholderText("例如 1-1，2，3-2")
         self.resolve_button = QPushButton("解析区域")
         self.current_label = QLabel("当前区域：-")
         self.page_label = QLabel("0/0")
@@ -83,26 +83,43 @@ class AvoidanceSettingsDialog(QDialog):
         navigation_row.addWidget(self.previous_button)
         navigation_row.addWidget(self.next_button)
 
-        parameter_form = QFormLayout()
-        parameter_form.addRow("U 扩大比例", self.u_expand)
-        parameter_form.addRow("V 扩大比例", self.v_expand)
-        parameter_form.addRow("N+ 高度", self.n_plus)
-        parameter_form.addRow("N- 高度", self.n_minus)
+        uv_row = QHBoxLayout()
+        uv_row.addWidget(QLabel("UV 扩大"))
+        uv_row.addWidget(QLabel("U"))
+        uv_row.addWidget(self.u_expand)
+        uv_row.addSpacing(18)
+        uv_row.addWidget(QLabel("V"))
+        uv_row.addWidget(self.v_expand)
+        uv_row.addStretch(1)
+
+        normal_row = QHBoxLayout()
+        normal_row.addWidget(QLabel("N 范围"))
+        normal_row.addWidget(QLabel("N+"))
+        normal_row.addWidget(self.n_plus)
+        normal_row.addSpacing(18)
+        normal_row.addWidget(QLabel("N-"))
+        normal_row.addWidget(self.n_minus)
+        normal_row.addStretch(1)
 
         self.hint = QLabel(
             "黄色=所选打磨面，绿色=支撑面，红色=范围内墙体，灰色透明体=UVN覆盖范围。"
             "U/V 的 30% 表示最终总宽度扩大到原来的 130%。"
         )
         self.hint.setWordWrap(True)
+        self.save_path_label = QLabel(f"保存位置：{self.settings_path}")
+        self.save_path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.save_path_label.setToolTip(str(self.settings_path))
         self.status = QLabel("请输入区域并解析")
         self.status.setWordWrap(True)
-        self.preview_button = QPushButton("预览")
+        self.clear_button = QPushButton("清除选择")
+        self.display_button = QPushButton("显示范围")
         self.apply_button = QPushButton("应用")
         self.cancel_button = QPushButton("取消")
 
         action_row = QHBoxLayout()
         action_row.addWidget(self.status, 1)
-        action_row.addWidget(self.preview_button)
+        action_row.addWidget(self.clear_button)
+        action_row.addWidget(self.display_button)
         action_row.addWidget(self.apply_button)
         action_row.addWidget(self.cancel_button)
 
@@ -110,8 +127,10 @@ class AvoidanceSettingsDialog(QDialog):
         layout.addWidget(self.preview, 1)
         layout.addLayout(selector_row)
         layout.addLayout(navigation_row)
-        layout.addLayout(parameter_form)
+        layout.addLayout(uv_row)
+        layout.addLayout(normal_row)
         layout.addWidget(self.hint)
+        layout.addWidget(self.save_path_label)
         layout.addLayout(action_row)
 
         self._preview_timer = QTimer(self)
@@ -121,11 +140,12 @@ class AvoidanceSettingsDialog(QDialog):
         self.resolve_button.clicked.connect(self._resolve_regions)
         self.previous_button.clicked.connect(lambda: self._show_entry(self._current_index - 1))
         self.next_button.clicked.connect(lambda: self._show_entry(self._current_index + 1))
-        self.preview_button.clicked.connect(self._refresh_preview)
+        self.clear_button.clicked.connect(self._clear_selection)
+        self.display_button.clicked.connect(self._toggle_preview)
         self.apply_button.clicked.connect(self._apply)
         self.cancel_button.clicked.connect(self.reject)
         for spin in (self.u_expand, self.v_expand, self.n_plus, self.n_minus):
-            spin.valueChanged.connect(lambda _value: self._preview_timer.start())
+            spin.valueChanged.connect(self._parameter_changed)
 
         self._set_parameter_enabled(False)
         if self.selector_edit.text().strip():
@@ -156,6 +176,7 @@ class AvoidanceSettingsDialog(QDialog):
     @staticmethod
     def _percent_spin(default: float) -> QDoubleSpinBox:
         spin = QDoubleSpinBox()
+        spin.setMinimumWidth(190)
         spin.setRange(0.0, 500.0)
         spin.setDecimals(1)
         spin.setSingleStep(5.0)
@@ -166,6 +187,7 @@ class AvoidanceSettingsDialog(QDialog):
     @staticmethod
     def _distance_spin() -> QDoubleSpinBox:
         spin = QDoubleSpinBox()
+        spin.setMinimumWidth(190)
         spin.setRange(0.0, 100_000.0)
         spin.setDecimals(1)
         spin.setSingleStep(25.0)
@@ -180,7 +202,7 @@ class AvoidanceSettingsDialog(QDialog):
             self.n_minus,
             self.previous_button,
             self.next_button,
-            self.preview_button,
+            self.display_button,
             self.apply_button,
         ):
             widget.setEnabled(enabled)
@@ -254,6 +276,8 @@ class AvoidanceSettingsDialog(QDialog):
                 )
             self._entries = entries
             self._current_index = -1
+            self._preview_visible = True
+            self.display_button.setText("隐藏范围")
             self._set_parameter_enabled(True)
             self._show_entry(0)
             self.status.setText(
@@ -263,9 +287,44 @@ class AvoidanceSettingsDialog(QDialog):
         except Exception as exc:
             self._entries = []
             self._current_index = -1
+            self._preview_visible = False
+            self.display_button.setText("显示范围")
             self._set_parameter_enabled(False)
+            self.preview.show_neutral_model("避障区域解析失败")
             self.status.setText(f"区域解析失败：{exc}")
             QMessageBox.warning(self, "避障区域解析失败", str(exc))
+
+    def _parameter_changed(self, _value: float) -> None:
+        if self._preview_visible:
+            self._preview_timer.start()
+
+    def _clear_selection(self) -> None:
+        self._preview_timer.stop()
+        self.selector_edit.clear()
+        self._entries = []
+        self._current_index = -1
+        self._preview_visible = False
+        self.current_label.setText("当前区域：-")
+        self.page_label.setText("0/0")
+        self.display_button.setText("显示范围")
+        self._set_parameter_enabled(False)
+        self.preview.show_neutral_model("已清除临时选择，请重新输入避障区域")
+        self.status.setText("已清除弹窗中的临时选择；不会删除已保存的 JSON 设置")
+
+    def _toggle_preview(self) -> None:
+        if not self._entries:
+            return
+        if self._preview_visible:
+            self._preview_timer.stop()
+            self._save_current_values()
+            self._preview_visible = False
+            self.display_button.setText("显示范围")
+            self.preview.show_neutral_model("避障范围已隐藏")
+            self.status.setText("避障范围已隐藏；参数仍保留")
+            return
+        self._preview_visible = True
+        self.display_button.setText("隐藏范围")
+        self._refresh_preview()
 
     def _path_seed_ids(self, planning_region: dict) -> set[int]:
         settings = backend.RasterPlannerSettings(
@@ -325,10 +384,13 @@ class AvoidanceSettingsDialog(QDialog):
         self.page_label.setText(f"{self._current_index + 1}/{len(self._entries)}")
         self.previous_button.setEnabled(len(self._entries) > 1)
         self.next_button.setEnabled(len(self._entries) > 1)
-        self._refresh_preview()
+        if self._preview_visible:
+            self._refresh_preview()
+        else:
+            self.preview.show_neutral_model(f"区域 {label}：避障范围已隐藏")
 
     def _refresh_preview(self) -> None:
-        if not (0 <= self._current_index < len(self._entries)):
+        if not self._preview_visible or not (0 <= self._current_index < len(self._entries)):
             return
         try:
             self._save_current_values()

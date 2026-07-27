@@ -276,6 +276,23 @@ class RegionPreview(QWidget):
         self._texture_data.clear()
         self.vtk_widget.GetRenderWindow().Render()
 
+    def show_neutral_model(self, message: str = "避障范围已隐藏") -> None:
+        """Hide avoidance overlays and restore one neutral workpiece color."""
+
+        self.clear_avoidance_volume()
+        if self._reader is None:
+            return
+        polydata = self._reader.GetOutput()
+        colors = vtkUnsignedCharArray()
+        colors.SetNumberOfComponents(3)
+        colors.SetName("NeutralModelColors")
+        for _cell_id in range(int(polydata.GetNumberOfCells())):
+            colors.InsertNextTypedTuple(DEFAULT_COLOR)
+        polydata.GetCellData().SetScalars(colors)
+        polydata.Modified()
+        self.vtk_widget.GetRenderWindow().Render()
+        self.set_message(message)
+
     def show_paths(self, paths: list[object]) -> None:
         """Overlay model-coordinate raster runs without joining holes or lines."""
         self.clear_paths()

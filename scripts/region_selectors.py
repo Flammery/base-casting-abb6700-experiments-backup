@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Shared parsing and resolution for experiment region/patch selectors."""
+
+from __future__ import annotations
 
 import re
 
@@ -27,7 +27,7 @@ def canonical_region_selector(raw: str) -> str:
 def parse_region_selectors(raw: str) -> list[str]:
     values: list[str] = []
     seen: set[str] = set()
-    for item in raw.split(","):
+    for item in re.split(r"[,，、;；]+", raw):
         if not item.strip():
             continue
         value = canonical_region_selector(item)
