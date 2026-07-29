@@ -108,12 +108,16 @@ patch.
   interference validation.
 
 - `experimental_algorithms/support_surface_growth.py`
-  Recovers an avoidance patch's full near-planar support from final path
-  `face_id` seeds. The Avoidance Settings dialog persists one model-coordinate
-  UVN volume per resolved planning label; only non-support cells intersecting
-  that volume enter the experimental wall mesh. Keep the sidecar separate from
-  `.rsp.json`, and preserve the yellow machining / green support / red wall /
-  translucent gray volume preview whenever thresholds or bounds change.
+  Resolves support and constructs the local wall-selection volume. An unsplit
+  region uses all machining `face_ids` directly as support; a derived patch
+  grows from final path seeds and then forcibly includes its source machining
+  cells. Project the complete support into UV, build one enclosing convex hull,
+  scale it in U/V, and extrude it in N. Only non-support cells intersecting that
+  prism enter the experimental wall mesh. The Avoidance Settings dialog
+  persists one model-coordinate UVN volume per planning label. Keep the sidecar
+  separate from `.rsp.json`; preserve the yellow machining / green support /
+  red wall / translucent gray volume semantics. See
+  `docs/WALL_SELECTION_LEARNING.md`.
 
 - `scripts/robotstudio_package.py`
   Packages selected Optimal-Y RAPID into one job per region/patch. It separates
@@ -167,6 +171,10 @@ patch.
 - For manual manifest v2, the raster polygon owns the machining boundary. STL
   cells only provide ray hits and normals. Preview colors use a raster texture,
   never cell-centroid classification or clipped replacement geometry.
+- Machining and wall cells are mutually exclusive. Unsplit regions use their
+  complete selected cell set as support. Derived patches may grow support, but
+  must union their source machining cells before wall extraction. The settings
+  UI and formal runner must share `support_for_planning_region()`.
 - Inherit tool and workobject names, TCP geometry, picked origin, and base
   placement data from the exported project. Experiment X/Y/Z/RZ must update
   model placement and wobj together through `placement_for()`. Use world/base
