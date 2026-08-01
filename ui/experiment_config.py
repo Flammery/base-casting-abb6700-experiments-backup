@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import sys
 
 EXPERIMENT_DIR = Path(__file__).resolve().parents[1]
@@ -9,12 +10,12 @@ ROOT = EXPERIMENT_DIR.parents[1]
 DEFAULT_INPUT = EXPERIMENT_DIR / "inputs" / "latest_script_test.rsp.json"
 DEFAULT_PARTITIONED = EXPERIMENT_DIR / "inputs" / "latest_partitioned.rsp.json"
 PARTITION_SCRIPT = EXPERIMENT_DIR / "scripts" / "region_partition_preprocess.py"
-RUNNER_SCRIPT = EXPERIMENT_DIR / "scripts" / "optimal_y_score_configurable.py"
+RUNNER_SCRIPT = EXPERIMENT_DIR / "scripts" / "configurable_experiment_runner.py"
 SCRIPT_DIR = EXPERIMENT_DIR / "scripts"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from region_selectors import parse_region_selectors  # noqa: E402
+from region_selectors import parse_region_selectors, validate_selectors  # noqa: E402
 
 DEFAULT_X = "3700"
 DEFAULT_Y = "-1900,100,1900"
@@ -90,27 +91,56 @@ def scan_axis_for_coordinates(x_text: str, y_text: str, z_text: str) -> str:
 
 def parse_turntable_angle_text(raw: str, default: str = DEFAULT_TURNTABLE_ANGLES) -> list[int]:
     text = default if not raw.strip() else raw.strip()
+    range_match = re.fullmatch(r"\s*(\d+)\s*[-:]\s*(\d+)\s*[-:]\s*(\d+)\s*", text)
+    if range_match is not None:
+        start, step, stop = (int(value) for value in range_match.groups())
+        if step <= 0:
+            raise ValueError("转台角度范围的 step 必须大于 0")
+        if stop < start:
+            raise ValueError("转台角度范围的 stop 必须大于等于 start")
+        tokens = [str(value) for value in range(start, stop + 1, step)]
+    else:
+        tokens = re.split(r"[,，、;；]+", text)
+
     values: list[int] = []
     seen: set[int] = set()
-    for item in text.split(","):
+    for item in tokens:
         token = item.strip()
         if not token:
             continue
         try:
             value = int(token) % 360
         except ValueError as exc:
-            raise ValueError("转台角度应为逗号分隔的整数，例如 270 或 0,180") from exc
+            raise ValueError(
+                "转台角度应为逗号分隔的整数或 start-step-stop，例如 0,180 或 0-30-330"
+            ) from exc
         if value not in seen:
             seen.add(value)
             values.append(value)
     if not values:
-        raise ValueError("至少填写一个转台角度，例如 270 或 0,180")
+        raise ValueError("至少填写一个转台角度，例如 270、0,180 或 0-30-330")
     return values
 
 
 def turntable_angle_args(raw: str) -> list[str]:
     values = parse_turntable_angle_text(raw)
     return ["--experiment-mode", "turntable", "--angles", ",".join(str(value) for value in values)]
+
+
+def validated_avoidance_settings(
+    payload: dict,
+    project_path: Path,
+    planning_regions: list[dict],
+) -> tuple[list[str], list[str]]:
+    """Validate a saved avoidance sidecar against the current partition."""
+
+    configured_project = Path(str(payload.get("input_project", "")))
+    if configured_project.resolve() != Path(project_path).resolve():
+        raise ValueError("设置对应的输入项目与当前项目不一致")
+    selectors = [str(value) for value in payload.get("selectors", [])]
+    validate_selectors(selectors, planning_regions)
+    labels = [str(record.get("region_label", "")).replace("_", "-") for record in payload.get("regions", [])]
+    return selectors, labels
 
 
 def parse_custom_window_text(raw: str) -> dict[str, tuple[float, float] | None]:

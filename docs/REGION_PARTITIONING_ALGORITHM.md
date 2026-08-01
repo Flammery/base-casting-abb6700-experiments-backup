@@ -130,7 +130,7 @@ base Y 切成两个约 `800 x 1200` 的小区。
 "collision_status": "not_evaluated"
 ```
 
-当前实验的可选避障筛查在后续 `scripts/optimal_y_score_configurable.py` 中执行：它根据
+当前实验的可选避障筛查在后续 `scripts/configurable_experiment_runner.py` 中执行：它根据
 用户的 region/patch selector，从最终几何路径恢复支撑面，构造墙体障碍网格，再调用
 `experimental_algorithms/robot_pose_avoidance.py` 做代表点 IK/FK、杆系碰撞和间隙粗筛。
 结果写入候选/最优记录和 `robot_avoidance_trials.csv`，不会回写这里的自动分区 manifest。

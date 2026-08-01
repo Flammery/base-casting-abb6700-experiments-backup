@@ -1120,7 +1120,7 @@ flowchart TD
 文件：
 
 ```text
-scripts/optimal_y_score_configurable.py
+scripts/configurable_experiment_runner.py
 ```
 
 重点：

@@ -36,6 +36,31 @@ region/patch 的机械臂替代姿态试验见 `docs/ROBOT_ARM_AVOIDANCE_WORKFLO
 `.rsp.json` 选面快照，必要时先做区域分区，然后按窗口/固定构型策略导出 ABB
 RAPID 路径，最后可选地做导轨 Y 位置选择。
 
+## 环境依赖
+
+本仓库不提交虚拟环境，运行时复用同一工作区中的 `src` 主程序仓库。三个仓库应保持
+下面的相对目录结构：
+
+```text
+p1/
+├─ src/
+└─ experiments/
+   └─ base_casting_abb6700/
+```
+
+首次克隆或更换电脑后，在 `p1` 目录创建虚拟环境，然后进入本实验仓库安装依赖：
+
+```powershell
+py -3.12 -m venv .venv
+cd experiments\base_casting_abb6700
+..\..\.venv\Scripts\python.exe -m pip install --upgrade pip
+..\..\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+`requirements.txt` 会以 editable 模式安装 `../../src`，并安装实验测试和静态检查所需的
+`pytest`、`ruff`。`.venv/`、PyCharm 的 `.idea/` 和 VS Code 的 `.vscode/` 都只保留在
+本机，不提交到 Git。
+
 ## 当前流程
 
 推荐按四步走：
@@ -119,7 +144,7 @@ texture 显示；STL 不会被切割或重建。
 - 第一行“开始”使用默认 `auto` planner：内部孔和与边界有面积重叠的 exclude 进入
   cell 规划；仅接触边界不算。普通采样后若同一 scanline 被拆成多个 run，也会升级；
 - hole-aware 完整加工每个 cell，并在 cell 之间法向抬刀转场；普通面保留快速 raster；
-- 新策略结果目录追加 `_hole_aware`，不会覆盖同日 legacy 输出；
+- 新策略类型写入 `summary.json`；结果目录使用日期和当日递增编号，运行之间不会覆盖；
 - “快速预览路径”使用同一自动判定，并在状态栏显示 cell 抬刀数量与触发原因。
 
 新策略同时支持 manual-v2 patch 和未划分的原始 face-id region。manual-v2 的显式
@@ -137,7 +162,9 @@ split-scanline 后直接复用投影扫描轴建立 cells。完整限制见 `HOL
 解析后范围自动显示。“隐藏范围/显示范围”只切换三维叠加显示，参数仍保留；
 “清除选择”只清空弹窗中的临时选择，便于重新输入，不会删除已经保存的设置。
 点击“应用”才写入输入项目旁边的同名 `*_avoidance.json`，具体路径显示在弹窗底部；
-不会修改 `.rsp.json` 或分区 manifest。
+不会修改 `.rsp.json` 或分区 manifest。保存文件只是可复用设置，不会在下次启动 UI
+时自动启用；只有本次在弹窗中点击“应用”，下一次 runner 才会收到避障参数。只解析、
+预览、取消或关闭弹窗均不启用。runner 结束后自动解除启用，但保留 JSON 供下次编辑。
 
 弹窗中黄色为打磨面、绿色为恢复支撑面、红色为 UVN 范围内墙体、半透明灰色体为
 覆盖范围。完整支撑面的所有顶点先投影到 UV 平面并生成一个二维凸包，凸包会有意
@@ -150,8 +177,14 @@ split-scanline 后直接复用投影扫描轴建立 cells。完整限制见 `HOL
 数值 IK/FK、抽样碰撞和间隙筛查；本次墙体范围功能没有改变这些规则。
 
 转台角度不再使用固定预设。实验 UI 的“转台”输入框可填写单个角度 `270`，也可填写
-多个角度 `0,180` 或 `0,30,180`；逗号分隔、按输入顺序运行，负角度和 360 会规范到
-`0..359`。
+多个角度 `0,180` 或范围 `0-30-330`；逗号列表按输入顺序运行，范围格式依次为
+`start-step-stop` 且包含终点，负角度和 360 会规范到 `0..359` 并去重。
+
+默认结果目录使用紧凑的
+`x位置-y位置-z位置-angle角度-YYYYMMDD-编号` 规则。例如：
+`x3500-ym1900,100,1900-z440-angle0,30,330-20260801-01`。坐标范围按
+`起点,步长,终点` 表示，负数以 `m`、小数点以 `p` 表示；编号在同一天全局递增。
+planner、窗口模式和是否启用避障等完整参数记录在 `summary.json`，不再放进目录名。
 
 ## 常用命令
 

@@ -56,7 +56,7 @@
 - `experimental_algorithms/support_surface_growth.py`：支撑面、UV 凸包和墙体 cell 筛选。
 - `ui/avoidance_settings_dialog.py`：参数设置和预览。
 - `ui/region_viewer.py`：黄色、绿色、红色及灰色范围显示。
-- `scripts/optimal_y_score_configurable.py`：正式避障 runner 使用筛选后的墙体网格。
+- `scripts/configurable_experiment_runner.py`：正式避障 runner 使用筛选后的墙体网格。
 
 参数应用后保存到输入项目旁的 `*_avoidance.json`，不会修改 `.rsp.json` 或分区
 manifest。

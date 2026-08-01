@@ -98,7 +98,7 @@ sidecar。只有“应用”会写入弹窗底部所示的 `*_avoidance.json`。
 
 ## 输出日志
 
-启用避障后结果目录追加 `_robot_avoid`，并写：
+是否启用避障记录在结果目录内的 `summary.json`，并写：
 
 - `robot_avoidance_trials.csv`：每个 pose/angle/region/feed/candidate 的 roll、IK 失败数、
   碰撞数、碰撞连杆名称、抽样最小间隙、要求间隙、构型数、最大关节跳变、
@@ -116,5 +116,5 @@ RobotStudio 低速/单步检查完整 MoveL/MoveJ、真实工具、环境、自�
 - `scripts/robot_config_override.py`：读取并验证主程序 `.rsc.json`，应用 MDH/seed 和配置包络；
 - `experimental_algorithms/support_surface_growth.py`：路径种子区域生长和墙体障碍网格；
 - `experimental_algorithms/robot_pose_avoidance.py`：姿态库、IK/FK/碰撞筛查和回退；
-- `scripts/optimal_y_score_configurable.py`：只对命中项调度试验并写日志；
+- `scripts/configurable_experiment_runner.py`：只对命中项调度试验并写日志；
 - `src/robot_studio_qt/tools/reachability/collision.py`：通用杆段—工件碰撞几何。

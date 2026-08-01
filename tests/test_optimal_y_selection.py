@@ -13,8 +13,29 @@ from optimal_y_selection import choose_best_by_region  # noqa: E402
 
 def test_ordinary_region_keeps_world_y_policy() -> None:
     rows = [
-        {"region": 1, "score_max_abs_world_y": 100.0, "model_y": -1000.0, "angle_deg": 0},
-        {"region": 1, "score_max_abs_world_y": 20.0, "model_y": 900.0, "angle_deg": 180},
+        {"region": 1, "score_max_abs_world_y": 100.0, "score_max_abs_world_x": 1.0},
+        {"region": 1, "score_max_abs_world_y": 20.0, "score_max_abs_world_x": 900.0},
+    ]
+
+    assert choose_best_by_region(rows)[0] is rows[1]
+
+
+def test_ordinary_region_uses_world_x_only_when_world_y_is_tied() -> None:
+    rows = [
+        {
+            "region": 1,
+            "score_max_abs_world_y": 20.0,
+            "score_max_abs_world_x": 100.0,
+            "model_y": 0.0,
+            "angle_deg": 0,
+        },
+        {
+            "region": 1,
+            "score_max_abs_world_y": 20.0,
+            "score_max_abs_world_x": 50.0,
+            "model_y": 1900.0,
+            "angle_deg": 270,
+        },
     ]
 
     assert choose_best_by_region(rows)[0] is rows[1]
@@ -83,6 +104,7 @@ def test_not_evaluated_avoidance_region_uses_world_y_policy() -> None:
             "avoidance_roll_degrees": 0.0,
             "avoidance_min_clearance_mm": None,
             "score_max_abs_world_y": 800.0,
+            "score_max_abs_world_x": 10.0,
             "model_y": -1800.0,
             "angle_deg": 271,
         },
@@ -93,6 +115,7 @@ def test_not_evaluated_avoidance_region_uses_world_y_policy() -> None:
             "avoidance_roll_degrees": 0.0,
             "avoidance_min_clearance_mm": None,
             "score_max_abs_world_y": 120.0,
+            "score_max_abs_world_x": 20.0,
             "model_y": -600.0,
             "angle_deg": 271,
         },

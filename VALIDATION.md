@@ -28,7 +28,7 @@
    `robot_avoidance_trials.csv`，且包含 selected/status/interference/clearance/
    joint-jump/reason。
 6. `ik-unresolved` 或支撑面恢复失败但几何非空的路径应保留在候选记录，且
-   不得进入 `optimal_paths`；普通区域仍按 world-Y规则进入最优选择。
+   不得进入 `optimal_paths`；普通区域先按 world-Y、并列时再按 world-X 进入最优选择。
 7. 检查抽样 IK/FK、连杆碰撞和最小间隙结果后，仍必须在 RobotStudio验证
    完整路径、工具、环境、自碰撞和 ABB控制器构型。
 8. UI实验成功后应自动打开本次结果目录；失败进程不打开，Explorer 启动
@@ -70,7 +70,7 @@ C:\Users\21093\Desktop\p1\.venv\Scripts\python.exe -m pytest tests -q
 7. 点击快速预览，检查两个 patch 独立生成扫描方向。
 8. 检查 auto 快速预览：孔洞内没有蓝色路径，状态栏显示正确的 cell 抬刀数量和判定原因。
 9. 点击唯一“开始”运行 auto；如需对照，再从 CLI 强制 `--planner hole-aware`，确认输出
-   目录分别为普通目录和 `_hole_aware` 目录，互不覆盖。
+   目录具有不同的当日递增编号且互不覆盖，并在各自 `summary.json.planner` 中记录策略。
 10. 检查 hole-aware 点 CSV：每个 cell 的光栅完整连续，cell 边界有独立安全进退刀点。
 11. 检查 hole-aware RAPID：加工与法向进退刀使用 MoveL，两个 cell 的抬起点之间使用 MoveJ。
 12. 手算法向安全位置：`safe = endpoint + normal × SAFE_DISTANCE`，并确认转换后的 wobj 坐标。

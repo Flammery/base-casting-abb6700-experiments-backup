@@ -1,8 +1,8 @@
-"""Compatibility entry point for the renamed configurable experiment runner.
+"""Backward-compatible entry point for the configurable experiment runner.
 
-New UI, documentation, and integrations should use
-``configurable_experiment_runner.py``. This wrapper remains so historical
-commands and external scripts continue to work without changing behavior.
+The implementation moved to ``configurable_experiment_runner.py``. Historical
+commands may keep using this filename while the UI and new integrations use the
+generic runner name.
 """
 
 from configurable_experiment_runner import *  # noqa: F401,F403

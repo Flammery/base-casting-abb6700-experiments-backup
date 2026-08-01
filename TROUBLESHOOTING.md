@@ -1,5 +1,27 @@
 # Troubleshooting
 
+## “开始”立即提示找不到 configurable_experiment_runner
+
+- 正式实现必须存在于 `scripts/configurable_experiment_runner.py`；实验 UI 直接启动该文件。
+- `scripts/optimal_y_score_configurable.py` 只是旧命令兼容入口，不应包含正式 runner 逻辑，也不能成为唯一文件。
+- 通用 runner 不得导入 `scripts/runs/optimal_y_score_x3500_z440.py`；`runs/` 只保留历史固定参数入口。
+- 用当前项目 Python 分别执行两个入口的 `--help`，两者都应返回 exit code 0：
+
+  ```powershell
+  python scripts/configurable_experiment_runner.py --help
+  python scripts/optimal_y_score_configurable.py --help
+  ```
+
+- 若从旧备份恢复，确认 `scripts/optimal_y_selection.py` 仍含完整选择器实现；在候选选择器迁移正式完成前，不要只恢复一个指向缺失 `candidate_selection.py` 的包装器。
+
+## “开始”提示避障区域不存在
+
+- 这通常不是 runner 断开，而是输入项目以同一个文件名重新分区后，`*_avoidance.json` 仍保存着旧 patch 标签。例如旧配置选择了 `1-1`，当前分区只存在 `6-1`、`6-2` 等标签。
+- 保存的 `*_avoidance.json` 只是可复用设置，不会自动启用，也不会阻止普通实验；主界面会显示“有已保存配置（本次未启用）”。
+- 本次 runner 需要避障时，重新打开“避障设置”，按当前分区标签解析并点击“应用”；只解析、预览、取消或关闭弹窗都不会启用避障。
+- “应用”只武装下一次 runner。runner 结束后自动解除，但配置文件继续保留；下次需要避障时必须再次点击“应用”。
+- 转台角度可填写逗号列表（如 `0,30,60`），也可填写 `start-step-stop`（如 `0-30-330`）。范围终点包含在内；`0-30-360` 会把等价于 0° 的 360° 去重，结果仍为 0° 到 330°。
+
 ## 避障设置应用后红色墙体为空或范围不正确
 
 - 确认主界面当前输入与 `*_avoidance.json` 中的 `input_project` 完全一致；重新分区或切换输入后应重新打开“避障设置”并应用。
@@ -138,7 +160,7 @@
 
 ## Auto 和 CLI 强制 hole-aware 结果互相覆盖
 
-- 默认情况下新策略目录会追加 `_hole_aware`。
+- 默认结果目录以完整日期和当日递增编号隔离，不再追加 `_hole_aware`。
 - 如果显式传入相同的 `--output-dir`，目录隔离由调用者负责。
 - 检查 `summary.json` 的 `planner` 字段，避免把 legacy 和 hole-aware 结果混用。
 

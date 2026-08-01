@@ -12,7 +12,7 @@ if str(SCRIPT_DIR) not in sys.path:
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import optimal_y_score_x3500_z440 as runner
+import optimal_y_score_x3500_z440 as runner  # noqa: E402
 
 
 X_VALUES = [3600.0, 3700.0]
@@ -77,8 +77,11 @@ def main() -> None:
         "y_step": runner.Y_STEP,
         "angles_deg": runner.ANGLES,
         "feed_variants": [variant for variant, _feed in runner.FEED_VARIANTS],
-        "selection_metric": "score_max_abs_world_y",
-        "selection_metric_definition": "max(abs(world_y)) over processing waypoints only",
+        "selection_metric": "min_max_abs_world_y_then_min_max_abs_world_x",
+        "selection_metric_definition": (
+            "minimize max(abs(world_y)) over processing waypoints; "
+            "if tied, minimize max(abs(world_x))"
+        ),
         "candidate_table": str(candidate_table),
         "optimal_table": str(optimal_table),
         "coverage_table": str(coverage_table),

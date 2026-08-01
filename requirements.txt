@@ -1,0 +1,7 @@
+# The experiment reuses the adjacent robot-studio-qt source repository.
+# Keep the workspace layout as p1/src and p1/experiments/base_casting_abb6700.
+-e ../../src
+
+# Experiment tests and static checks.
+pytest>=8,<10
+ruff>=0.14,<0.16

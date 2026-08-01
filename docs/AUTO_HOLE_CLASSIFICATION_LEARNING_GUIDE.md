@@ -37,7 +37,7 @@
 scripts/window_conf_export.py::plan_region_uv_auto()
 ```
 
-`scripts/optimal_y_score_configurable.py::run_optimal_scan()` 在正式批量运行时调用该函数；
+`scripts/configurable_experiment_runner.py::run_optimal_scan()` 在正式批量运行时调用该函数；
 实验 UI 的快速预览也调用同一个函数。核心逻辑是：
 
 ```python
@@ -712,7 +712,7 @@ relevant_holes
 path_has_split_scanlines
 ```
 
-再阅读 `scripts/optimal_y_score_configurable.py::run_optimal_scan()`，确认正式 runner 怎样
+再阅读 `scripts/configurable_experiment_runner.py::run_optimal_scan()`，确认正式 runner 怎样
 调用统一分流函数并记录 `planner_reason`。
 
 ---

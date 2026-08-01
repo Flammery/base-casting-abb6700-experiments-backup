@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, QTimer, Qt, QUrl
+from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -40,6 +40,7 @@ from experiment_config import (  # noqa: E402
     parse_turntable_angle_text,
     read_region_count,
     runner_command,
+    validated_avoidance_settings,
     validate_regions,
 )
 from manual_partition_dialog import (  # noqa: E402
@@ -70,6 +71,9 @@ class ExperimentPanel(QWidget):
         self.robot_config_path: Path | None = None
         self.avoidance_settings_path: Path | None = None
         self.avoidance_selectors: list[str] = []
+        self._avoidance_armed = False
+        self._avoidance_applied_project: Path | None = None
+        self._avoidance_settings_error: str | None = None
 
         self.input_path = QLineEdit(str(DEFAULT_INPUT))
         self.input_path.setMinimumWidth(360)
@@ -103,8 +107,8 @@ class ExperimentPanel(QWidget):
         self.robotstudio_timer.setInterval(1000)
 
         self.turntable_angles = QLineEdit(DEFAULT_TURNTABLE_ANGLES)
-        self.turntable_angles.setPlaceholderText("270 或 0,180")
-        self.turntable_angles.setFixedWidth(125)
+        self.turntable_angles.setPlaceholderText("270、0,180 或 0-30-330")
+        self.turntable_angles.setFixedWidth(190)
 
         self.model_x = self._coord_edit(DEFAULT_X)
         self.model_y = self._coord_edit(DEFAULT_Y)
@@ -245,36 +249,71 @@ class ExperimentPanel(QWidget):
         self.region_count.setText(f"regions: {count}")
         self.status.setText(f"当前输入: {path}")
         self.preview.load_project(path)
-        self._refresh_avoidance_settings(path)
+        active_for_current_project = (
+            self._avoidance_armed
+            and self._avoidance_applied_project is not None
+            and self._avoidance_applied_project == path.resolve()
+        )
+        if not active_for_current_project:
+            self._refresh_avoidance_settings(path, activate=False)
 
     def _clear_avoidance_settings(self) -> None:
         self.avoidance_settings_path = None
         self.avoidance_selectors = []
-        self.avoidance_settings_label.setText("未配置")
+        self._avoidance_armed = False
+        self._avoidance_applied_project = None
+        self._avoidance_settings_error = None
+        self.avoidance_settings_label.setText("未配置（避障关闭）")
         self.avoidance_settings_label.setToolTip("设置避障 region/patch 和 UVN 墙体覆盖范围")
 
-    def _refresh_avoidance_settings(self, project_path: Path) -> None:
+    def _refresh_avoidance_settings(self, project_path: Path, *, activate: bool) -> bool:
+        """Inspect saved settings, and activate them only after explicit Apply."""
+
         settings_path = path_preview_backend.avoidance_settings_path_for(project_path)
+        self._clear_avoidance_settings()
         if not settings_path.exists():
-            self._clear_avoidance_settings()
-            return
+            return False
         try:
             payload = path_preview_backend.load_avoidance_settings(settings_path)
-            if Path(str(payload.get("input_project", ""))).resolve() != project_path.resolve():
-                raise ValueError("设置对应的输入项目与当前项目不一致")
-            selectors = [str(value) for value in payload.get("selectors", [])]
-            labels = [str(record.get("region_label", "")).replace("_", "-") for record in payload.get("regions", [])]
         except Exception as exc:
-            self._clear_avoidance_settings()
-            self.avoidance_settings_label.setText("配置无效")
-            self.avoidance_settings_label.setToolTip(str(exc))
-            return
+            self._avoidance_settings_error = str(exc)
+            self.avoidance_settings_label.setText("历史配置无效（本次未启用）")
+            self.avoidance_settings_label.setToolTip(f"{settings_path}\n{exc}")
+            return False
+
+        labels = [str(record.get("region_label", "")).replace("_", "-") for record in payload.get("regions", [])]
+        if not activate:
+            count_text = f" {len(labels)} 个区域" if labels else ""
+            self.avoidance_settings_label.setText(f"有已保存配置{count_text}（本次未启用）")
+            self.avoidance_settings_label.setToolTip(
+                f"{settings_path}\n只有在避障设置窗口点击“应用”后，下一次运行才会启用"
+            )
+            return False
+
+        try:
+            project = path_preview_backend.load_project_file(project_path)
+            regions = [set(region) for region in project.selected_path_face_regions]
+            planning_regions = path_preview_backend.manual_clip_regions(project_path, regions)
+            selectors, labels = validated_avoidance_settings(payload, project_path, planning_regions)
+        except Exception as exc:
+            self._avoidance_settings_error = str(exc)
+            self.avoidance_settings_label.setText("配置无效（本次未启用）")
+            self.avoidance_settings_label.setToolTip(f"{settings_path}\n{exc}")
+            return False
+
         self.avoidance_settings_path = settings_path
         self.avoidance_selectors = selectors
+        self._avoidance_armed = True
+        self._avoidance_applied_project = project_path.resolve()
+        self._avoidance_settings_error = None
         self.avoidance_settings_label.setText(
-            f"已配置 {len(labels)} 个区域：" + ",".join(labels[:4]) + ("..." if len(labels) > 4 else "")
+            f"已应用：下一次运行启用避障（{len(labels)} 个区域："
+            + ",".join(labels[:4])
+            + ("..." if len(labels) > 4 else "")
+            + "）"
         )
-        self.avoidance_settings_label.setToolTip(str(settings_path))
+        self.avoidance_settings_label.setToolTip(f"{settings_path}\n本次设置将在下一次 runner 结束后自动解除")
+        return True
 
     def configure_avoidance(self) -> None:
         if self._process is not None:
@@ -291,7 +330,11 @@ class ExperimentPanel(QWidget):
             return
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        self._refresh_avoidance_settings(project_path)
+        if not self._refresh_avoidance_settings(project_path, activate=True):
+            message = self._avoidance_settings_error or "避障设置未能启用"
+            self.status.setText(f"避障设置应用失败: {message}")
+            QMessageBox.warning(self, "避障设置应用失败", message)
+            return
         self.status.setText(
             f"避障设置已应用: {self.avoidance_settings_label.text()} | {self.avoidance_settings_path}"
         )
@@ -422,6 +465,7 @@ class ExperimentPanel(QWidget):
             return
 
         self.input_path.setText(str(output_path))
+        self._clear_avoidance_settings()
         self.refresh_region_count()
         self.preview.load_project(output_path)
         manifest_path = manual_manifest_path_for(output_path)
@@ -458,6 +502,13 @@ class ExperimentPanel(QWidget):
             input_path = Path(self.input_path.text())
             if not input_path.exists():
                 raise ValueError(f"输入文件不存在: {input_path}")
+            if self._avoidance_armed and not self._refresh_avoidance_settings(input_path, activate=True):
+                raise ValueError(
+                    f"已应用的避障配置与当前分区不匹配: {self._avoidance_settings_error}；"
+                    "请重新打开“避障设置”并应用当前区域"
+                )
+            avoidance_selectors = ",".join(self.avoidance_selectors) if self._avoidance_armed else ""
+            avoidance_settings_path = self.avoidance_settings_path if self._avoidance_armed else None
             command = runner_command(
                 sys.executable,
                 input_path,
@@ -468,9 +519,9 @@ class ExperimentPanel(QWidget):
                 self.window_limits.text(),
                 self.boundary_margin.text(),
                 planner,
-                ",".join(self.avoidance_selectors),
+                avoidance_selectors,
                 self.robot_config_path,
-                self.avoidance_settings_path,
+                avoidance_settings_path,
             )
         except Exception as exc:
             self.status.setText(f"实验参数错误: {exc}")
@@ -495,6 +546,9 @@ class ExperimentPanel(QWidget):
         process.setProgram(command[0])
         process.setArguments(command[1:])
         process.setWorkingDirectory(str(ROOT))
+        environment = QProcessEnvironment.systemEnvironment()
+        environment.insert("PYTHONUTF8", "1")
+        process.setProcessEnvironment(environment)
         process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         process.readyReadStandardOutput.connect(self._collect_output)
         process.finished.connect(self._process_finished)
@@ -511,6 +565,7 @@ class ExperimentPanel(QWidget):
             self.status.setText(last_line)
 
     def _process_finished(self, exit_code: int, _status) -> None:
+        process_kind = self._process_kind
         self._process = None
         self.start_button.setEnabled(True)
         self.apply_partition_button.setEnabled(True)
@@ -519,6 +574,8 @@ class ExperimentPanel(QWidget):
         self.robot_config_button.setEnabled(True)
         self.avoidance_settings_button.setEnabled(True)
         self.turntable_angles.setEnabled(True)
+        if process_kind == "run":
+            self._refresh_avoidance_settings(Path(self.input_path.text()), activate=False)
         if exit_code != 0:
             tail = "\n".join(self._runner_output.splitlines()[-8:])
             self.status.setText(f"运行失败，exit={exit_code}: {tail}")
@@ -528,6 +585,7 @@ class ExperimentPanel(QWidget):
         if self._process_kind == "partition":
             output_path = Path(self.partition_output_path)
             self.input_path.setText(str(output_path))
+            self._clear_avoidance_settings()
             self.refresh_region_count()
             self.preview.load_project(output_path)
             self.status.setText(f"已另存并应用: {output_path}")

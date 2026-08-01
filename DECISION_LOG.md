@@ -1,5 +1,83 @@
 # Decision Log
 
+## D028 Compact numbered result directories
+
+- 日期：2026-08-01
+- 状态：Accepted
+- 替代范围：取代 D011/D013 中关于 `_hole_aware` 目录后缀的命名约定，不改变其路径算法决定。
+- 背景：旧结果目录包含较长的扫描、模式和避障后缀，却没有直接显示实验角度；同日重复运行
+  同一组参数还会落到同一路径。
+- 决定：默认目录改为
+  `x位置-y位置-z位置-angle角度-YYYYMMDD-当日编号`，例如
+  `x3500-ym1900,100,1900-z440-angle0,30,330-20260801-01`。范围使用
+  `起点,步长,终点`，负数用 `m`，小数点用 `p`。
+- 编号：扫描当天所有新格式结果目录并取最大编号加一；runner 启动时用排他式建目录原子预留，
+  避免并行运行复用编号。显式 `--output-dir` 继续尊重调用者路径。
+- 元数据：planner、窗口模式、实验模式和避障状态保留在 `summary.json`，不再进入目录名。
+- 相关代码/测试：`scripts/configurable_experiment_runner.py`、
+  `tests/test_experiment_ui_config.py`。
+
+## D027 Avoidance sidecar requires an explicit per-run Apply
+
+- 日期：2026-08-01
+- 状态：Accepted
+- 背景：输入项目旁已有 `*_avoidance.json` 时，实验 UI 过去会在加载输入后自动把它传给
+  runner；因此只打开弹窗解析但不应用，或者重新分区后遗留旧配置，也可能意外触发避障分析。
+- 决定：保存文件只作为可复用配置。UI 启动、选择输入和发现历史 sidecar 时避障保持关闭；
+  只有避障弹窗成功点击“应用”后才武装下一次 runner。解析、预览、取消和关闭弹窗均不改变
+  启用状态。runner 成功或失败结束后解除武装，但不删除配置文件。
+- 校验：显式应用和 runner 启动前都按当前项目/分区验证 selector；未应用的旧配置即使过期，
+  也不阻止普通区域实验。快速预览使用与 runner 相同的本次启用状态。
+- UI：区分“有已保存配置（本次未启用）”和“已应用：下一次运行启用避障”，避免把文件存在
+  误解为已经启用。
+- 相关代码/测试：`ui/experiment_panel.py`、`ui/experiment_config.py`、
+  `tests/test_experiment_ui_config.py`。
+
+## D026 Ordinary-path world-Y ties use world-X extent only
+
+- Date: 2026-08-01
+- Status: Accepted
+- Scope: ordinary and hole-aware regions that are not using the robot-avoidance
+  candidate policy.
+- Decision: choose each region independently by minimizing
+  `max(abs(world_y))` over its processing waypoints. If and only if that score
+  is tied, minimize `max(abs(world_x))` over the same processing waypoints.
+- Removed ranking fields: `abs(model_y)`, numeric `angle_deg`, and `region`.
+  They are retained as output metadata but are not path-quality metrics. Region
+  was already constant inside each per-region group and could not break a tie.
+- Exact ties after both scores retain the first candidate in deterministic scan
+  order; this is output stability, not an additional physical ranking rule.
+- Not changed: avoidance-region eligibility or ranking.
+- Related code/tests: `scripts/optimal_y_selection.py`,
+  `scripts/configurable_experiment_runner.py`, historical fixed-run summaries,
+  and `tests/test_optimal_y_selection.py`.
+
+## D025 Configurable runner no longer depends on a fixed-parameter run
+
+- Date: 2026-08-01
+- Status: Accepted
+- Background: the configurable runner was moved from `scripts/runs/` into
+  `scripts/` in D7C1835, but it still imported the historical
+  `optimal_y_score_x3500_z440.py` entry for backend aliases, raster settings,
+  selected-file copying, and mutable output globals. The interrupted rename in
+  83DB106 then deleted that fixed entry and replaced the runner with a wrapper
+  whose target file was never committed.
+- Decision: the active CLI/UI implementation is
+  `scripts/configurable_experiment_runner.py`. It imports
+  `window_conf_export.py` and the existing selection module directly and owns
+  its generic raster settings and selected-record copying. It does not import
+  anything under `scripts/runs/`.
+- Compatibility: `scripts/optimal_y_score_configurable.py` remains a thin
+  import/CLI wrapper so saved commands continue to work. The historical x3500
+  entry is restored only for the other fixed-parameter scripts that still use
+  it; new code must not depend on it.
+- Unchanged in this migration: ordinary world-Y selection, avoidance ranking,
+  output names (`optimal_paths`, `optimal_selection.csv`,
+  `optimal_records.json`), RAPID generation, and RobotStudio packaging.
+- Verification: both CLI filenames must support `--help`; UI command tests must
+  point to the generic runner; the fixed historical entries must remain
+  importable; and the full pytest suite must pass.
+
 ## D024 Complete regions and derived patches use different support rules
 
 - Date: 2026-07-28
@@ -15,7 +93,7 @@
   The settings dialog and configurable runner must call the same support
   resolver; this is a collision-data rule, not only a preview-color rule.
 - Related code/tests: `scripts/window_conf_export.py`,
-  `scripts/optimal_y_score_configurable.py`,
+  `scripts/configurable_experiment_runner.py`,
   `experimental_algorithms/support_surface_growth.py`,
   `tests/test_support_surface_growth.py`.
 
@@ -104,7 +182,7 @@
   library, changing IK/FK, or changing collision/clearance acceptance.
 - Related code: `ui/avoidance_settings_dialog.py`, `ui/region_viewer.py`,
   `experimental_algorithms/support_surface_growth.py`,
-  `scripts/optimal_y_score_configurable.py`.
+  `scripts/configurable_experiment_runner.py`.
 
 ## D019 Successful experiment runs open their result directory
 
@@ -133,7 +211,7 @@
 - Rejected alternative: changing the shared `kinematics/solvers.py` before the
   experiment policy has been validated on ABB/RobotStudio results.
 - Related code: `experimental_algorithms/robot_pose_avoidance.py`,
-  `scripts/optimal_y_score_configurable.py`, and
+  `scripts/configurable_experiment_runner.py`, and
   `scripts/optimal_y_selection.py`.
 
 ## D017 Verified RAPID imports synchronize model and displayed workobject
@@ -338,7 +416,7 @@
 - 边界：当前只恢复近似平面，不是自由曲面语义分割；机械臂仍为抽样点/简化包络，
   不含工具、环境、自碰撞和连续扫掠验证。
 - 相关代码/测试：`experimental_algorithms/support_surface_growth.py`、
-  `scripts/optimal_y_score_configurable.py`、`ui/region_viewer.py`、
+  `scripts/configurable_experiment_runner.py`、`ui/region_viewer.py`、
   `tests/test_support_surface_growth.py`。
 
 ## 新决策模板

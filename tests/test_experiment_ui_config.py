@@ -19,13 +19,25 @@ def _load_ui_config_module():
 
 
 def _load_runner_module():
-    script = Path(__file__).resolve().parents[1] / "scripts" / "optimal_y_score_configurable.py"
-    spec = importlib.util.spec_from_file_location("optimal_y_score_configurable_test", script)
+    script = Path(__file__).resolve().parents[1] / "scripts" / "configurable_experiment_runner.py"
+    spec = importlib.util.spec_from_file_location("configurable_experiment_runner_test", script)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_historical_runner_entrypoint_reexports_generic_runner() -> None:
+    scripts_dir = Path(__file__).resolve().parents[1] / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+
+    import configurable_experiment_runner as generic_runner
+    import optimal_y_score_configurable as historical_runner
+
+    assert historical_runner.main is generic_runner.main
+    assert historical_runner.run_from_args is generic_runner.run_from_args
 
 
 def test_parse_region_text_keeps_order_and_deduplicates() -> None:
@@ -71,11 +83,53 @@ def test_turntable_angle_arguments_accept_single_and_multiple_angles() -> None:
     assert module.parse_turntable_angle_text("271") == [271]
     assert module.parse_turntable_angle_text("0,180") == [0, 180]
     assert module.parse_turntable_angle_text("360,-30,330") == [0, 330]
+    expected_range = list(range(0, 360, 30))
+    assert module.parse_turntable_angle_text("0-30-330") == expected_range
+    assert module.parse_turntable_angle_text("0:30:330") == expected_range
+    assert module.parse_turntable_angle_text("0-30-360") == expected_range
     assert module.turntable_angle_args("0,30,180") == [
         "--experiment-mode", "turntable", "--angles", "0,30,180"
     ]
     with pytest.raises(ValueError, match="转台角度"):
         module.parse_turntable_angle_text("0,abc")
+    with pytest.raises(ValueError, match="stop"):
+        module.parse_turntable_angle_text("330-30-0")
+
+
+def test_saved_avoidance_settings_must_match_current_partition(tmp_path) -> None:
+    module = _load_ui_config_module()
+    project_path = tmp_path / "input.rsp.json"
+    planning_regions = [
+        {"label": "6_1", "source_region": 6},
+        {"label": "6_2", "source_region": 6},
+    ]
+    payload = {
+        "input_project": str(project_path),
+        "selectors": ["1_1"],
+        "regions": [{"region_label": "1_1"}],
+    }
+
+    with pytest.raises(ValueError, match="避障区域不存在"):
+        module.validated_avoidance_settings(payload, project_path, planning_regions)
+
+    payload["selectors"] = ["6_1"]
+    payload["regions"] = [{"region_label": "6_1"}]
+    assert module.validated_avoidance_settings(payload, project_path, planning_regions) == (
+        ["6_1"],
+        ["6-1"],
+    )
+
+
+def test_saved_avoidance_settings_must_belong_to_current_project(tmp_path) -> None:
+    module = _load_ui_config_module()
+    payload = {
+        "input_project": str(tmp_path / "old.rsp.json"),
+        "selectors": [],
+        "regions": [],
+    }
+
+    with pytest.raises(ValueError, match="当前项目不一致"):
+        module.validated_avoidance_settings(payload, tmp_path / "current.rsp.json", [])
 
 
 def test_parse_coordinate_text_fixed_and_range() -> None:
@@ -200,6 +254,29 @@ def test_runner_command_adds_avoidance_volume_settings_when_selected(tmp_path) -
     )
 
     assert command[command.index("--avoidance-settings") + 1] == str(settings_path)
+
+
+def test_runner_command_does_not_auto_enable_existing_avoidance_sidecar(tmp_path) -> None:
+    project_path = tmp_path / "input.rsp.json"
+    sidecar_path = tmp_path / "input_avoidance.json"
+    sidecar_path.write_text("{}", encoding="utf-8")
+    module = _load_ui_config_module()
+
+    command = module.runner_command(
+        "python",
+        project_path,
+        "3700",
+        "0",
+        "440",
+        "270",
+        "1500,2500;-1050,1050",
+        "6",
+        "auto",
+    )
+
+    assert sidecar_path.exists()
+    assert "--avoidance-settings" not in command
+    assert "--avoidance-regions" not in command
 
 
 def test_configurable_runner_defaults_to_auto_planner() -> None:
@@ -331,15 +408,47 @@ def test_configurable_runner_default_output_dir_mentions_scan() -> None:
     x_spec = module.parse_coordinate_spec("3700", 3700.0)
     y_spec = module.parse_coordinate_spec("-1900,100,1900", 0.0)
     z_spec = module.parse_coordinate_spec("440", 440.0)
-    outdir = module.default_output_dir(x_spec, y_spec, z_spec, [0, 180], "custom", "rail", date_suffix="0713")
+    outdir = module.default_output_dir(
+        x_spec,
+        y_spec,
+        z_spec,
+        [0, 180],
+        "custom",
+        "rail",
+        date_suffix="20260713",
+        run_number=3,
+    )
 
-    assert outdir.name == "x3700_yM1900_1900_step100_z440_rail_0713"
-    assert "optY" not in outdir.name
-    assert "long" not in outdir.name
-    assert "x3700" in outdir.name
-    assert "yM1900_1900_step100" in outdir.name
-    assert "rz000_180" not in outdir.name
-    assert "cwin" not in outdir.name
+    assert outdir.name == "x3700-ym1900,100,1900-z440-angle0,180-20260713-03"
+
+
+def test_configurable_runner_compacts_regular_angle_range() -> None:
+    module = _load_runner_module()
+
+    assert module.compact_angles_label(list(range(0, 360, 30))) == "angle0,30,330"
+
+
+def test_configurable_runner_daily_number_avoids_existing_results(tmp_path) -> None:
+    module = _load_runner_module()
+    (tmp_path / "first-20260713-01").mkdir()
+    (tmp_path / "different-parameters-20260713-03").mkdir()
+    (tmp_path / "old-style-0713").mkdir()
+    x_spec = module.parse_coordinate_spec("3500", 3700.0)
+    y_spec = module.parse_coordinate_spec("-1900,100,1900", 0.0)
+    z_spec = module.parse_coordinate_spec("440", 440.0)
+
+    outdir = module.default_output_dir(
+        x_spec,
+        y_spec,
+        z_spec,
+        [270],
+        "custom",
+        "turntable",
+        date_suffix="20260713",
+        results_root=tmp_path,
+    )
+
+    assert outdir.name == "x3500-ym1900,100,1900-z440-angle270-20260713-04"
 
 
 def test_configurable_runner_default_output_path_stays_short_enough() -> None:
@@ -348,7 +457,16 @@ def test_configurable_runner_default_output_path_stays_short_enough() -> None:
     x_spec = module.parse_coordinate_spec("3700", 3700.0)
     y_spec = module.parse_coordinate_spec("-1900,100,1900", 0.0)
     z_spec = module.parse_coordinate_spec("440", 440.0)
-    outdir = module.default_output_dir(x_spec, y_spec, z_spec, [0, 180], "custom", "rail", date_suffix="0713")
+    outdir = module.default_output_dir(
+        x_spec,
+        y_spec,
+        z_spec,
+        [0, 180],
+        "custom",
+        "rail",
+        date_suffix="20260713",
+        run_number=1,
+    )
     sample = (
         outdir
         / "candidates"

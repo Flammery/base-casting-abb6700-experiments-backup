@@ -24,7 +24,7 @@
 flowchart TD
     UI["ui/experiment_panel.py\n输入避障 selector / 快速几何预览"]
     CFG["ui/experiment_config.py\n组装正式 runner 命令"]
-    RUN["scripts/optimal_y_score_configurable.py\n正式批量编排"]
+    RUN["scripts/configurable_experiment_runner.py\n正式批量编排"]
     EXP["scripts/window_conf_export.py\n几何路径 + RAPID 导出"]
     SEL["scripts/region_selectors.py\n解析 region/patch"]
     RCFG["scripts/robot_config_override.py\n导入 MDH/seed/包络"]
@@ -65,7 +65,7 @@ flowchart TD
 | `scripts/window_conf_export.py` | 生成几何路径、孔洞/cell 抬刀、150 mm 接近/离开点和 RAPID；同时作为实验模块的导入汇总层 | 本身不筛机器人碰撞 |
 | `experimental_algorithms/support_surface_growth.py` | 从最终路径 `face_id` 恢复近共面支撑面；从障碍网格移除支撑面并抽样最多 6000 个墙体三角形 | 构造碰撞网格 |
 | `experimental_algorithms/robot_pose_avoidance.py` | 枚举 5 个固定 TCP-Z roll；每个候选最多抽 7 点，做数值 IK、关节跳变、J5、FK 杆段碰撞和间隙 | 是，离散粗筛 |
-| `scripts/optimal_y_score_configurable.py` | 正式总编排；只对 selector 命中的路径调用支撑面恢复和姿态筛查，写报告并过滤 optimal 输入 | 调度 |
+| `scripts/configurable_experiment_runner.py` | 正式总编排；只对 selector 命中的路径调用支撑面恢复和姿态筛查，写报告并过滤 optimal 输入 | 调度 |
 | `scripts/optimal_y_selection.py` | 普通路径按 world-Y 评分；避障路径只在已验证候选中按最小绝对 roll、再按最大间隙选择 | 否 |
 
 ## 4. `p1/src` 中直接或关键支撑文件
@@ -116,7 +116,8 @@ flowchart TD
 
 ### 6.1 对 2026-07-22 最新结果的核对
 
-`results/x3500_yM1900_1900_step100_z440_turn_0722_robot_avoid/summary.json` 明确记录：
+旧实验示例 `results/x3500_yM1900_1900_step100_z440_turn_0722_robot_avoid/summary.json`
+以及采用新目录命名的实验都在 `summary.json` 中明确记录：
 
 ```text
 avoidance_requested = 1_1,1_2

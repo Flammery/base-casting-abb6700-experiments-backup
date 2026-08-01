@@ -84,15 +84,22 @@ patch.
 
 - `scripts/optimal_y_selection.py`
   Lightweight selector for dual-robot rail experiments. Ordinary and hole-aware
-  regions use `max(abs(world_y))` over processing waypoints. Internally
+  regions minimize `max(abs(world_y))` over processing waypoints and use
+  `max(abs(world_x))` only to break a world-Y tie. Internally
   validated avoidance rows instead minimize absolute TCP local-Z roll and then
   maximize sampled robot clearance. Unresolved avoidance rows remain available
   for RobotStudio diagnosis but do not enter optimal output.
 
-- `scripts/optimal_y_score_configurable.py`
+- `scripts/configurable_experiment_runner.py`
   Stable configurable CLI/UI runner. It scans the user-supplied installation
   range and turntable angles, dispatches the reusable planners and optional
-  robot-pose avoidance, and writes candidate/optimal/diagnostic reports.
+  robot-pose avoidance, and writes candidate/optimal/diagnostic reports. It
+  depends directly on `window_conf_export.py` and the selection module; it must
+  not import a fixed-parameter entry under `scripts/runs/`.
+
+- `scripts/optimal_y_score_configurable.py`
+  Backward-compatible import/CLI wrapper for historical commands. Keep all real
+  runner behavior in `configurable_experiment_runner.py`.
 
 - `scripts/robot_config_override.py`
   Loads a main-application `robot_studio_mechanism_config` export for avoidance
@@ -134,7 +141,7 @@ patch.
 - `scripts/runs/`
   Historical and concrete fixed-parameter experiment entries. They import the
   reusable scripts above and preserve earlier standalone batches. New UI and
-  configurable runs use `scripts/optimal_y_score_configurable.py`.
+  configurable runs use `scripts/configurable_experiment_runner.py`.
 
 - root-level `window_conf_export_*.py` wrappers
   Historical compatibility entry points. Keep real implementations under

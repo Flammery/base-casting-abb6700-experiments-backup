@@ -1,8 +1,14 @@
 # Python/cache
 __pycache__/
 *.py[cod]
+.venv/
+venv/
 .pytest_cache/
 .ruff_cache/
+
+# Editor/project settings
+.idea/
+.vscode/
 
 # Generated experiment outputs
 results/*
