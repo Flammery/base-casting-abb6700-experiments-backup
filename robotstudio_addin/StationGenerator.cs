@@ -14,6 +14,8 @@ namespace ABB6700.RobotStudioExport
     {
         private const string ManifestSchema = "base_casting_abb6700.robotstudio_jobs";
         private const string SidecarSchema = "base_casting_abb6700.robotstudio_station_job";
+        private const string BridgeModuleName = "RSBRIDGE";
+        private const string ManagedPathModulePrefix = "VALIDATE_R";
         private static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
         private static string _lastSynchronizedKey = "";
         private static string _observedStationPath = "";
@@ -105,16 +107,6 @@ namespace ABB6700.RobotStudioExport
                 try
                 {
                     ABB.Robotics.Controllers.RapidDomain.Task rapidTask = controller.Rapid.GetTask(sidecar.controller_task);
-                    Module[] loadedModules = rapidTask.GetModules();
-                    Module[] loadedMainModules = loadedModules
-                        .Where(module => module.GetRoutine("main") != null)
-                        .ToArray();
-                    if (loadedMainModules.Length == 1
-                        && System.String.Equals(loadedMainModules[0].Name, sidecar.path_module_name, StringComparison.OrdinalIgnoreCase)
-                        && loadedModules.Any(module => System.String.Equals(module.Name, sidecar.calib_module_name, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        return;
-                    }
                     rapidTask.Stop();
                     using (Mastership.Request(controller.Rapid))
                     {
@@ -124,29 +116,38 @@ namespace ABB6700.RobotStudioExport
                             "RSBRIDGE.mod");
                         File.WriteAllText(
                             bridgeModulePath,
-                            "MODULE RSBRIDGE\r\n    PROC bridge_hold()\r\n    ENDPROC\r\nENDMODULE\r\n");
-                        if (!rapidTask.LoadModuleFromFile(bridgeModulePath, RapidLoadMode.Replace))
+                            "MODULE " + BridgeModuleName + "\r\n    PROC bridge_hold()\r\n    ENDPROC\r\nENDMODULE\r\n");
+                        Module existingBridge = FindModule(rapidTask, BridgeModuleName);
+                        if (existingBridge == null
+                            && !rapidTask.LoadModuleFromFile(bridgeModulePath, RapidLoadMode.Replace))
+                        {
                             throw new InvalidOperationException("RobotStudio rejected the temporary program-pointer bridge module.");
-                        rapidTask.SetProgramPointer("RSBRIDGE", "bridge_hold");
+                        }
+                        if (existingBridge == null)
+                            rapidTask.SetProgramPointer(BridgeModuleName, "bridge_hold");
 
+                        // Only remove modules owned by this add-in.  Calling GetRoutine on a
+                        // partially loaded module can itself fail in RobotWare 6 and prevent
+                        // recovery on every later station open.
                         foreach (Module module in rapidTask.GetModules().ToArray())
                         {
-                            if (!System.String.Equals(module.Name, sidecar.calib_module_name, StringComparison.OrdinalIgnoreCase)
-                                && module.GetRoutine("main") != null)
-                            {
+                            if (IsManagedPathModule(module.Name))
                                 module.Delete();
-                            }
                         }
+                        // A failed earlier switch can legitimately leave the program pointer in
+                        // RSBRIDGE. RobotWare refuses any pointer operation while a partially
+                        // loaded path still has syntax errors, so remove that managed path first.
+                        if (existingBridge != null)
+                            rapidTask.SetProgramPointer(BridgeModuleName, "bridge_hold");
                         if (!rapidTask.LoadModuleFromFile(sidecar.calib_module, RapidLoadMode.Replace))
                             throw new InvalidOperationException("RobotStudio rejected CalibData: " + sidecar.calib_module);
                         if (!rapidTask.LoadModuleFromFile(sidecar.path_module, RapidLoadMode.Replace))
+                        {
+                            DeleteModuleIfPresent(rapidTask, sidecar.path_module_name);
                             throw new InvalidOperationException("RobotStudio rejected path module: " + sidecar.path_module);
-                        Module mainModule = rapidTask.GetModules()
-                            .Single(module => module.GetRoutine("main") != null);
-                        rapidTask.SetProgramPointer(mainModule.Name, "main");
-                        rapidTask.GetModules()
-                            .Single(module => System.String.Equals(module.Name, "RSBRIDGE", StringComparison.OrdinalIgnoreCase))
-                            .Delete();
+                        }
+                        rapidTask.SetProgramPointer(sidecar.path_module_name, "main");
+                        DeleteModuleIfPresent(rapidTask, BridgeModuleName);
                     }
                     rsTask.EntryPoint = "main";
                 }
@@ -155,6 +156,29 @@ namespace ABB6700.RobotStudioExport
                     controller.Logoff();
                 }
             }
+        }
+
+        private static bool IsManagedPathModule(string moduleName)
+        {
+            return !System.String.IsNullOrWhiteSpace(moduleName)
+                && moduleName.StartsWith(ManagedPathModulePrefix, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void DeleteModuleIfPresent(
+            ABB.Robotics.Controllers.RapidDomain.Task rapidTask,
+            string moduleName)
+        {
+            Module module = FindModule(rapidTask, moduleName);
+            if (module != null)
+                module.Delete();
+        }
+
+        private static Module FindModule(
+            ABB.Robotics.Controllers.RapidDomain.Task rapidTask,
+            string moduleName)
+        {
+            return rapidTask.GetModules()
+                .FirstOrDefault(item => System.String.Equals(item.Name, moduleName, StringComparison.OrdinalIgnoreCase));
         }
 
         private static void WriteStatus(string path, ExportStatus status)

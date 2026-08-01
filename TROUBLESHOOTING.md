@@ -1,5 +1,52 @@
 # Troubleshooting
 
+## RobotStudio 出现 `CalibData + RSBRIDGE + VALIDATE_Rx` 且 RAPID 语法错误
+
+典型现象：
+
+- 打开任意新旧 `.rsstn` 都看到三个模块，`RSBRIDGE` 长时间不消失；
+- `addin.log` 先出现 `RobotStudio rejected path module`，随后反复出现
+  `RobSymbol Parse error` 或 `Operation not allowed due to syntax error(s)`；
+- 控制器事件日志把 `VALIDATE_Rx.mod` 报告为 RAPID syntax error；
+- 系统重装后插件仍能加载，但安装目录 DLL 的时间、大小或 SHA-256 与仓库构建不一致。
+
+已确认的根因和判断顺序：
+
+1. 查看失败模块第 2 行。旧版输出把含中文 CAD 路径的 `RSP_EXPERIMENT_META_V1` JSON
+   原样写成 UTF-8；RobotWare 6.08 会在这些非 ASCII 字节位置报告语法错误。7 月 15 日
+   结果早于该元数据功能，所以没有这个问题；7 月 19 日后的未修复结果可能受影响。
+2. `RSBRIDGE` 是程序指针切换桥，不是加工程序。正常切换完成后必须删除；仍然可见表示
+   上一次切换中途失败。
+3. 多个生成工作站复用同一个模板虚拟控制器。控制器已残留损坏模块时，打开旧工作站也会
+   失败，这不表示旧 `.rsstn` 被改坏。
+4. `RAPID synchronized` 只有在路径模块实际重载成功后才可信；不能只凭控制器中已有同名
+   `VALIDATE_Rx` 就认为同步完成。
+
+修复后的数据合同：
+
+- exporter 使用 ASCII JSON；中文写成 `\uXXXX`，主程序解析后仍得到原中文路径；
+- packager 会在重新打包时转换历史 `.txt` 的元数据，不重新计算轨迹；
+- 插件只管理 `VALIDATE_R*`，不会对损坏模块调用 `GetRoutine("main")`；
+- 检测到历史 `RSBRIDGE` 时，先删除损坏 `VALIDATE_R*`，再复用桥接模块完成切换。
+
+恢复步骤：
+
+1. 保存工作并关闭全部 RobotStudio 窗口。
+2. 在仓库根目录运行 `scripts/install_robotstudio_addin.ps1`；确认输出的安装目录是目标
+   RobotStudio 6.08.01 的 `Bin/Addins`，并重启 RobotStudio。
+3. 对受影响结果重新运行
+   `python scripts/robotstudio_package.py <实验结果目录>`；不要手动改名或移走 `.mod`。
+4. 一次只打开一个生成工作站，等待 `addin.log` 出现
+   `RAPID synchronized for active station`。
+5. 最终控制器应只有当前 `VALIDATE_Rx` 和 `CalibData`（模板自带模块除外），不得残留
+   `RSBRIDGE` 或前一区域的 `VALIDATE_Rx`；执行 Check Program 应为 0 个错误。
+
+日志位置：
+
+- `%LOCALAPPDATA%\ABB6700RobotStudioBridge\addin.log`
+- `%LOCALAPPDATA%\ABB6700RobotStudioBridge\last_error.txt`
+- RobotStudio/虚拟控制器事件日志中的 `Load error`、`Program loaded` 和模块删除记录
+
 ## “开始”立即提示找不到 configurable_experiment_runner
 
 - 正式实现必须存在于 `scripts/configurable_experiment_runner.py`；实验 UI 直接启动该文件。

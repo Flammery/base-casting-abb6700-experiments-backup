@@ -24,6 +24,9 @@ _CALIB_DECLARATION = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]*\s*:=.*?;[ \t]*(?:\r?\n)?"
 )
 _MODULE_HEADER = re.compile(r"(?im)^([ \t]*MODULE\s+)([A-Za-z_][A-Za-z0-9_]*)")
+_EXPERIMENT_META_COMMENT = re.compile(
+    r"(?m)^([ \t]*!\s*RSP_EXPERIMENT_META_V1)[ \t]+(\{[^\r\n]*\})[ \t]*(?=\r?$)"
+)
 
 
 @dataclass(frozen=True)
@@ -145,6 +148,15 @@ def split_rapid_modules(source_text: str, region_label: str, calib_module_name: 
         raise ValueError(f"Expected one tooldata and one wobjdata declaration, got tool={tool_count}, wobj={wobj_count}")
 
     path_text = _CALIB_DECLARATION.sub("", source_text)
+
+    def ascii_metadata(match: re.Match[str]) -> str:
+        try:
+            metadata = json.loads(match.group(2))
+        except json.JSONDecodeError as error:
+            raise ValueError("Invalid RSP_EXPERIMENT_META_V1 JSON") from error
+        return f"{match.group(1)} {json.dumps(metadata, ensure_ascii=True, separators=(',', ':'))}"
+
+    path_text = _EXPERIMENT_META_COMMENT.sub(ascii_metadata, path_text)
     module_name = f"{rapid_identifier(prefix)}_{rapid_identifier(region_label)}"
     if len(module_name) > 32:
         module_name = module_name[:32]

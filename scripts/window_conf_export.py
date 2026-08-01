@@ -494,15 +494,21 @@ def rapid_experiment_metadata(placement, region_label: str) -> dict:
     }
 
 
+def rapid_experiment_metadata_comment(placement, region_label: str) -> str:
+    """Serialize placement metadata using RobotWare 6-safe ASCII text."""
+    metadata = rapid_experiment_metadata(placement, region_label)
+    payload = json.dumps(metadata, ensure_ascii=True, separators=(",", ":"))
+    return f"! RSP_EXPERIMENT_META_V1 {payload}"
+
+
 def rapid_text(module_name: str, placement, tool, path, motion_waypoints, region_label: str = "") -> str:
     # RAPID robtarget 的位置和姿态都写在 wobj 坐标系下；世界姿态要先转换到 wobj 相对姿态。
     ext_axes = "9E9,9E9,9E9,9E9,9E9,9E9"
     q_wobj = euler_xyz_degrees_to_quaternion(placement.wobj_rx, placement.wobj_ry, placement.wobj_rz)
     q_world_to_wobj = q_wobj.conjugated()
-    experiment_metadata = rapid_experiment_metadata(placement, region_label)
     lines = [
         f"MODULE {module_name}",
-        f"    ! RSP_EXPERIMENT_META_V1 {json.dumps(experiment_metadata, ensure_ascii=False, separators=(',', ':'))}",
+        f"    {rapid_experiment_metadata_comment(placement, region_label)}",
         f"    {tool_to_rapid(tool)}",
         (
             f"    PERS wobjdata {path.workobject_name}:=[FALSE,TRUE,\"\","

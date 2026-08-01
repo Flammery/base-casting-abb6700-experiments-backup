@@ -1,5 +1,34 @@
 # Decision Log
 
+## D029 RobotWare 6 RAPID 元数据兼容与插件失败恢复
+
+- 日期：2026-08-01
+- 状态：Accepted
+- 背景：系统重装后，RobotStudio 6.08 安装目录中的自定义插件 DLL 仍可加载，但它是早于
+  仓库源码的旧构建。同时，D015 将包含中文 CAD 路径的 JSON 以原始 UTF-8 写入
+  `RSP_EXPERIMENT_META_V1` 注释；RobotWare 6.08 在该行报告 RAPID 语法错误。插件已经把
+  程序指针移到 `RSBRIDGE` 并删除旧路径后才发现加载失败，因而控制器残留
+  `CalibData + RSBRIDGE + VALIDATE_R5`，后续再枚举损坏模块的 `main` 又触发
+  `RobSymbol Parse error`。
+- 决定：RAPID 内嵌元数据必须用 `ensure_ascii=True` 序列化；中文等非 ASCII 字符写成
+  JSON `\uXXXX` 转义，Qt 导入器通过 `json.loads` 恢复原值。RobotStudio 打包器也必须
+  规范化历史 `.txt` 中已有的元数据，使旧实验不必重新规划路径即可重新打包。
+- 插件恢复：自动切换只删除本插件拥有的 `VALIDATE_R*` 模块，不再通过
+  `GetRoutine("main")` 识别模块。若上次失败留下 `RSBRIDGE`，先删除损坏路径、清除任务
+  语法错误，再复用桥接例程；加载新路径成功后直接把程序指针设到该模块的 `main` 并删除
+  `RSBRIDGE`。不得因为模块名相同就跳过本次工作站文件的实际加载。
+- 安装规则：更新插件前关闭 RobotStudio，运行 `scripts/install_robotstudio_addin.ps1`，并核对
+  `robotstudio_addin/bin/Release` 与 RobotStudio `Bin/Addins` 中 DLL 的 SHA-256 一致。安装后
+  必须重新启动 RobotStudio。`.NET Framework 4.6.1` Targeting Pack 缺失造成的 `MSB3644`
+  是构建环境警告，不能代替真实插件加载和控制器程序检查。
+- 验证结果：重新打包两组 2026-08-01 结果后，31 个 `VALIDATE_*.mod` 均为 ASCII；真实
+  RobotStudio 6.08.01 自动恢复到 `CalibData + VALIDATE_R2`，无 `RSBRIDGE`/旧
+  `VALIDATE_R5`，控制器 `CheckProgram()` 返回 0 个错误。
+- 诊断证据：`%LOCALAPPDATA%\ABB6700RobotStudioBridge\addin.log`、`last_error.txt` 和
+  Windows/控制器事件日志。相关代码/测试：`scripts/window_conf_export.py`、
+  `scripts/robotstudio_package.py`、`robotstudio_addin/StationGenerator.cs`、
+  `tests/test_window_conf_export.py`、`tests/test_robotstudio_package.py`。
+
 ## D028 Compact numbered result directories
 
 - 日期：2026-08-01

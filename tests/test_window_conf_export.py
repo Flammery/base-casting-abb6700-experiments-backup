@@ -92,6 +92,30 @@ def test_rapid_experiment_metadata_records_full_model_pose() -> None:
     assert metadata["region_label"] == "1_1"
 
 
+def test_rapid_experiment_metadata_comment_is_robotware_6_safe_ascii() -> None:
+    module = _load_script_module()
+    placement = SimpleNamespace(
+        model_x=3500.0,
+        model_y=1600.0,
+        model_z=440.0,
+        model_rx=0.0,
+        model_ry=0.0,
+        model_rz=0.0,
+        name="wobj1",
+        file_path=r"C:\cad\底座毛坯三维.stp",
+        picked_origin=(-2011.833, -2309.704, 549.128),
+        wobj_rx=0.0,
+        wobj_ry=0.0,
+    )
+
+    comment = module.rapid_experiment_metadata_comment(placement, "2")
+    prefix = "! RSP_EXPERIMENT_META_V1 "
+
+    assert comment.encode("ascii").decode("ascii") == comment
+    assert "底座" not in comment
+    assert json.loads(comment[len(prefix) :])["workpiece_file_path"] == placement.file_path
+
+
 def test_version_1_manifest_uses_materialized_project_regions(tmp_path) -> None:
     module = _load_script_module()
     project_path = tmp_path / "partitioned.rsp.json"

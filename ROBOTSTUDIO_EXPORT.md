@@ -64,10 +64,16 @@ robotstudio_status.json
 
 ## RobotStudio 运行方式
 
+- `RSP_EXPERIMENT_META_V1` 虽然是 RAPID 注释，也必须兼容 RobotWare 6；JSON 始终使用
+  ASCII 序列化，中文路径写成 `\uXXXX`。打包历史结果时会执行相同规范化，Qt 导入器解析
+  JSON 后仍恢复原始 Unicode 文本；
 - 打包器从模板复制 `.rsstn`，只修改指定场景组件的安装矩阵，不覆盖模板；
 - 生成的工作站仍使用模板工作站中已经实验标定的虚拟控制器；
 - 打开任一生成工作站后，插件等待控制器就绪，再读取同名 `.robotstudio_job.json`，自动把该面的 `CalibData.mod` 和路径模块装入 `T_ROB1`；
 - 从一个面切换到另一个面时，插件先用临时 `RSBRIDGE` 例程移动程序指针，再删除旧路径、加载新路径并把指针设到新 `main`；`RSBRIDGE` 随后删除；
+- 若上次失败留下 `RSBRIDGE` 和语法损坏的 `VALIDATE_R*`，插件先按模块名删除本插件管理的
+  损坏路径，再复用桥接例程恢复；禁止对损坏模块调用 `GetRoutine("main")`，也禁止仅凭
+  同名模块存在就跳过当前 sidecar 的实际重载；
 - 因为这些工作站顺序复用同一实验虚拟控制器，一次只打开并验证一个生成工作站。复制 `.rsstn` 时必须同时保留同目录 `.mod` 和 `.robotstudio_job.json`。
 
 ## 版本和边界

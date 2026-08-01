@@ -145,3 +145,11 @@ auto 运行时第 1 项改为确认 `planner=auto`，并核对
 7. 模板工作站的哈希和最后修改时间不得改变。
 8. 插件不得把“成功保存工作站”报告为碰撞、可达性或姿态验证通过。
 9. 切换完成后控制器中不得残留 `RSBRIDGE`，程序指针必须位于当前路径模块的 `main`。
+10. 用包含中文 CAD 文件名的实验生成 RAPID，确认 `RSP_EXPERIMENT_META_V1` 整行只含
+    ASCII，且 `json.loads` 后恢复原始中文路径。
+11. 用未修复的历史 `.txt` 重新打包，确认新的 `VALIDATE_Rx.mod` 已把中文转换成
+    `\uXXXX`，且 robtarget/Move 指令数量和坐标不变。
+12. 构造 `CalibData + RSBRIDGE +` 语法损坏 `VALIDATE_R5` 的失败状态，再打开区域 2
+    工作站；确认插件自动恢复为 `CalibData + VALIDATE_R2`，没有残留桥接或旧路径模块。
+13. 在真实 RobotStudio 6.08.01 中运行 Check Program，确认错误数为 0；同时核对安装目录
+    DLL 与 `robotstudio_addin/bin/Release` DLL 的 SHA-256 一致。

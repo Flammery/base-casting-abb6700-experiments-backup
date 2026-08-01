@@ -51,6 +51,22 @@ def test_split_moves_exported_tool_and_wobj_to_calibdata() -> None:
     assert "PERS wobjdata wobj1" in calib_text
 
 
+def test_split_escapes_experiment_metadata_for_robotware_6() -> None:
+    module = _load_module()
+    rapid = RAPID.replace(
+        "MODULE MODULE_R03\n",
+        'MODULE MODULE_R03\n    ! RSP_EXPERIMENT_META_V1 {"workpiece_file_path":"C:\\\\cad\\\\底座毛坯.stp"}\n',
+    )
+
+    path_text, _ = module.split_rapid_modules(rapid, "3", "CalibData", "VALIDATE")
+    metadata_line = next(line for line in path_text.splitlines() if "RSP_EXPERIMENT_META_V1" in line)
+    payload = metadata_line.split("RSP_EXPERIMENT_META_V1", 1)[1].strip()
+
+    assert path_text.encode("ascii").decode("ascii") == path_text
+    assert "底座" not in metadata_line
+    assert json.loads(payload)["workpiece_file_path"] == r"C:\cad\底座毛坯.stp"
+
+
 def test_build_package_writes_station_beside_each_optimal_path(tmp_path: Path) -> None:
     module = _load_module()
     result_dir = tmp_path / "result"
