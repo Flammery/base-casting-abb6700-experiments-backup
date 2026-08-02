@@ -129,6 +129,40 @@ def test_split_scanline_detection_distinguishes_holes_from_normal_lines() -> Non
     assert module.path_has_split_scanlines(split) is True
 
 
+def test_manual_v2_regular_raster_connects_adjacent_scanlines(monkeypatch) -> None:
+    module = _load_window_export_module()
+    normal = (0.0, 0.0, 1.0)
+    triangles = [
+        MeshTriangle(1, ((0.0, 0.0, 5.0), (100.0, 0.0, 5.0), (100.0, 100.0, 5.0)), normal, 5000.0),
+        MeshTriangle(2, ((0.0, 0.0, 5.0), (100.0, 100.0, 5.0), (0.0, 100.0, 5.0)), normal, 5000.0),
+    ]
+    chart = {
+        "origin": [0.0, 0.0, 0.0],
+        "u_axis": [1.0, 0.0, 0.0],
+        "v_axis": [0.0, 1.0, 0.0],
+        "normal": [0.0, 0.0, 1.0],
+    }
+    monkeypatch.setattr(module, "read_triangles", lambda _polydata, _region: triangles)
+    settings = RasterPlannerSettings(spacing=10.0, point_step=10.0, boundary_margin=2.0)
+
+    path = module.plan_region_uv(
+        object(),
+        WorkpiecePlacement(),
+        settings,
+        {1, 2},
+        module.RasterFeedDirection.LONG_SIDE,
+        [[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]],
+        [],
+        chart,
+    )
+    motion = module.build_motion(WorkpiecePlacement(), path)
+
+    assert path.waypoints
+    assert {raster_segment_id(waypoint.line_id) for waypoint in path.waypoints} == {0}
+    assert module.path_has_split_scanlines(path) is False
+    assert len(motion) == len(path.waypoints) + 2
+
+
 def test_hole_aware_plans_projected_face_id_region_without_manifest(monkeypatch) -> None:
     module = _load_window_export_module()
     normal = (0.0, 0.0, 1.0)

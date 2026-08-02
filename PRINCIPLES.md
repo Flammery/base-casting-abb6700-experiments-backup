@@ -62,6 +62,14 @@ intervals, and accepted samples are ray-projected to selected STL cells. The hit
 triangle supplies XYZ and facet normal only. Each patch derives its own scan
 axes from its own polygon.
 
+The manual sampler keeps a unique raw run id for every uninterrupted scanline
+interval so holes and ray misses remain detectable. Before ordinary motion is
+exported, adjacent one-to-one runs with overlapping U intervals are relabelled
+with a shared motion-cell id. Consequently a continuous no-hole patch has one
+approach and one departure for the complete raster, while real split/merge
+topology retains separate lifted transfers. Raw run ids must never be consumed
+directly as final motion-segment ids.
+
 The v2 manual manifest is the source of truth for these clips. It records the
 mode and per-region input geometry, while each patch records `clip_space`,
 `raster_chart`, `clip_polygon`, `exclude_polygons`, and source face ids. An

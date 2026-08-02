@@ -12,8 +12,14 @@ for path in (SRC, SCRIPTS, EXPERIMENTAL):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from hole_aware_raster import hole_aware_raster_samples, polygon_has_relevant_holes, projected_raster_cell_samples
+from hole_aware_raster import (
+    hole_aware_raster_samples,
+    manual_raster_cell_samples,
+    polygon_has_relevant_holes,
+    projected_raster_cell_samples,
+)
 from robot_studio_qt.path_planning.mesh_raster import MeshTriangle, encoded_raster_line_id
+from raster_domain import raster_samples
 
 
 def _plane_triangles():
@@ -61,6 +67,26 @@ def test_central_hole_is_split_into_cells_without_cross_hole_motion() -> None:
             and 30.0 < first_point[1] < 70.0
         )
         assert not crosses_hole_on_same_line
+
+
+def test_no_hole_manual_runs_form_one_motion_cell() -> None:
+    polygon = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]
+    raw = raster_samples(
+        polygon,
+        [],
+        _plane_triangles(),
+        _chart(),
+        spacing=10.0,
+        point_step=10.0,
+        margin=2.0,
+    )
+
+    samples, diagnostics = manual_raster_cell_samples(raw, _chart(), polygon, spacing=10.0)
+
+    assert len({sample[0] for sample in raw}) > 1
+    assert diagnostics["cell_count"] == 1
+    assert diagnostics["transfer_count"] == 0
+    assert {sample[0] for sample in samples} == {0}
 
 
 def test_fast_hole_check_ignores_holes_outside_current_patch() -> None:

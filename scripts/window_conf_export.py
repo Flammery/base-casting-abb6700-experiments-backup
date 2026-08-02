@@ -50,6 +50,7 @@ from robot_studio_qt.tools.reachability.collision import CollisionMesh, Collisio
 from raster_domain import point_to_uv, raster_samples
 from hole_aware_raster import (  # noqa: F401 - runner API
     hole_aware_raster_samples,
+    manual_raster_cell_samples,
     polygon_has_relevant_holes,
     projected_raster_cell_samples,
 )
@@ -758,7 +759,7 @@ def plan_region_uv(
         return PathResult(PathSource.MESH, placement.name, base_settings, message="Mesh has no selected triangular surface cells.")
     settings = replace(base_settings, feed_direction=feed_variant)
     if raster_chart and clip_polygon:
-        domain_samples = raster_samples(
+        raw_domain_samples = raster_samples(
             clip_polygon,
             exclude_polygons or [],
             triangles,
@@ -767,6 +768,13 @@ def plan_region_uv(
             settings.point_step,
             settings.boundary_margin,
             settings.bidirectional,
+            feed_variant == RasterFeedDirection.LONG_SIDE,
+        )
+        domain_samples, _cell_diagnostics = manual_raster_cell_samples(
+            raw_domain_samples,
+            raster_chart,
+            clip_polygon,
+            settings.spacing,
             feed_variant == RasterFeedDirection.LONG_SIDE,
         )
         samples = [

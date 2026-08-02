@@ -240,6 +240,18 @@ def projected_raster_cell_samples(samples, origin, u_axis, spacing: float):
     return _ordered_cell_samples(runs, spacing)
 
 
+def manual_raster_cell_samples(raw_samples, chart, polygon, spacing: float, long_side: bool = True):
+    """Relabel manual-domain scanline runs with motion-cell ids.
+
+    ``raster_samples()`` deliberately gives every uninterrupted scanline run a
+    unique source id so holes and ray misses remain observable.  Motion export
+    needs a different id: adjacent, overlapping runs belong to the same
+    boustrophedon cell and must not retract between ordinary scanlines.
+    """
+    runs = _make_runs(raw_samples, chart, polygon, long_side)
+    return _ordered_cell_samples(runs, spacing)
+
+
 def hole_aware_raster_samples(
     polygon,
     holes,
@@ -253,5 +265,4 @@ def hole_aware_raster_samples(
 ):
     """Return complete raster cells in their deterministic scan discovery order."""
     raw = raster_samples(polygon, holes, triangles, chart, spacing, point_step, margin, bidirectional, long_side)
-    runs = _make_runs(raw, chart, polygon, long_side)
-    return _ordered_cell_samples(runs, spacing)
+    return manual_raster_cell_samples(raw, chart, polygon, spacing, long_side)
