@@ -455,13 +455,6 @@ def run_optimal_scan(
     configure_window(args.window_mode, bounds)
 
     project = backend.load_project_file(args.project)
-    robot_override = (
-        backend.load_robot_config_override(args.robot_config)
-        if getattr(args, "robot_config", None)
-        else None
-    )
-    if robot_override is not None:
-        robot_override.apply_to_project(project)
     regions = [set(region) for region in project.selected_path_face_regions]
     if not regions:
         raise RuntimeError(f"No selected_path_face_regions in {args.project}")
@@ -484,6 +477,13 @@ def run_optimal_scan(
     avoidance_selectors = backend.parse_region_selectors(avoidance_raw)
     backend.validate_selectors(avoidance_selectors, planning_regions)
     avoidance_selector_set = set(avoidance_selectors)
+    robot_override = (
+        backend.load_robot_config_override(args.robot_config)
+        if getattr(args, "robot_config", None)
+        else None
+    )
+    if robot_override is not None:
+        robot_override.apply_to_project(project)
     resolved_avoidance_labels = [
         str(item["label"])
         for item in planning_regions
@@ -508,7 +508,7 @@ def run_optimal_scan(
             ignore_tcp_segment=False,
             use_segment_radius=backend.EXPERIMENT_USE_SEGMENT_RADIUS,
         )
-        collision_model_kind = "thin-centerline-links"
+        collision_model_kind = "uniform-radius-links"
 
     settings = planner_settings(project)
     vertices_by_region = {
@@ -885,6 +885,10 @@ def run_optimal_scan(
         "avoidance_required_clearance_mm": float(args.avoidance_min_clearance),
         "avoidance_collision_model": {
             "kind": collision_model_kind,
+            "uniform_link_radius_mm": (
+                None if robot_override is not None else float(collision_settings.link_radius)
+            ),
+            "use_configured_segment_radius": bool(collision_settings.use_segment_radius),
             "sampled_waypoints_per_trial": backend.DEFAULT_SAMPLE_LIMIT,
             "continuous_motion_checked": False,
         },
@@ -935,18 +939,21 @@ def run_optimal_scan(
         "feed_variants": [variant for variant, _feed in FEED_VARIANTS],
         "selection_metric": {
             "ordinary_or_hole_aware": "min_max_abs_world_y_then_min_max_abs_world_x",
-            "robot_avoidance": "validated_clear_then_min_abs_tcp_roll_then_max_clearance",
+            "robot_avoidance": "validated_clear_then_max_sampled_minimum_clearance",
         },
         "selection_metric_definition": {
             "ordinary_or_hole_aware": (
                 "minimize max(abs(world_y)) over processing waypoints; "
                 "if tied, minimize max(abs(world_x))"
             ),
-            "robot_avoidance": "only internally validated-clear paths may enter optimal selection",
+            "robot_avoidance": (
+                "only internally validated-clear paths may enter optimal selection; "
+                "maximize sampled minimum robot clearance without ranking by TCP roll"
+            ),
         },
         "tie_breakers": {
             "ordinary_or_hole_aware": ["score_max_abs_world_x"],
-            "robot_avoidance": ["abs(tcp_roll)", "negative_minimum_clearance"],
+            "robot_avoidance": ["stable_scan_order_for_exact_clearance_ties"],
         },
         "conf_y_negative": backend.CONF_Y_NEGATIVE,
         "conf_y_nonnegative": backend.CONF_Y_NONNEGATIVE,

@@ -233,6 +233,12 @@ real-cell safety certificate; tool, environment, self-collision, complete robot
 geometry, and swept motion remain outside this stage. Full rules are in
 `docs/ROBOT_ARM_AVOIDANCE_WORKFLOW.md`.
 
+Within one installation pose, select the validated roll whose sampled minimum
+robot clearance is largest. Across installation poses, avoidance regions use the
+same maximum-clearance rule. TCP roll magnitude and the ordinary world-Y/world-X
+scores do not rank avoidance candidates. Exact clearance ties retain the stable
+pose-library or scan order for deterministic output.
+
 ### UVN obstacle volumes
 
 Avoidance wall selection is configured separately from the project schema.
@@ -264,7 +270,8 @@ selection behavior is intentionally unchanged by this wall-selection stage.
 ## Y-Position Selection
 
 For dual-robot rail scans, first export feasible candidate paths with the
-fixed-window strategy. Then choose one candidate per region using:
+fixed-window strategy. Ordinary and hole-aware regions choose one candidate per
+region using:
 
 ```text
 score = max(abs(world_y))
@@ -273,6 +280,10 @@ score = max(abs(world_y))
 Use only processing waypoints for the score. Approach/depart points are motion
 padding and must not affect placement selection. Tie breakers are only for
 deterministic output, not extra optimization metrics.
+
+Opt-in robot-avoidance regions do not use this score. Among internally validated
+candidates they maximize sampled minimum robot clearance; TCP roll is not part of
+their ranking.
 
 Human-facing CSV tables for these runs should stay minimal: position plus
 covered region(s). Detailed file paths, point counts, and diagnostics belong in

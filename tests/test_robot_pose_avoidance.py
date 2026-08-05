@@ -14,11 +14,13 @@ for folder in (ROOT / "src", EXPERIMENT_DIR / "scripts", EXPERIMENT_DIR / "exper
 import robot_pose_avoidance  # noqa: E402
 from robot_pose_avoidance import (  # noqa: E402
     POSE_ROLL_DEGREES,
+    PoseTrial,
     apply_local_tcp_z_roll,
     evaluate_robot_pose,
     minimum_robot_clearance_mm,
+    select_robot_pose,
 )
-from robot_studio_qt.kinematics.model import JointState, RobotConfiguration  # noqa: E402
+from robot_studio_qt.kinematics.model import JointState, RobotConfiguration, WorkpiecePlacement  # noqa: E402
 from robot_studio_qt.kinematics.kinematics import Segment  # noqa: E402
 from robot_studio_qt.kinematics.orientation import Quaternion  # noqa: E402
 from robot_studio_qt.path_planning.models import PathResult, PathSource, RasterPlannerSettings, Waypoint  # noqa: E402
@@ -44,7 +46,26 @@ def _path() -> PathResult:
 
 
 def test_small_pose_library_is_deterministic_and_contains_baseline() -> None:
-    assert POSE_ROLL_DEGREES == (0.0, 15.0, -15.0, 30.0, -30.0)
+    assert POSE_ROLL_DEGREES == (
+        -90.0,
+        -75.0,
+        -60.0,
+        -45.0,
+        -30.0,
+        -15.0,
+        0.0,
+        15.0,
+        30.0,
+        45.0,
+        60.0,
+        75.0,
+        90.0,
+    )
+
+
+def test_unconfigured_avoidance_uses_uniform_100_mm_link_radius() -> None:
+    assert robot_pose_avoidance.EXPERIMENT_LINK_RADIUS_MM == 100.0
+    assert robot_pose_avoidance.EXPERIMENT_USE_SEGMENT_RADIUS is False
 
 
 def test_local_tcp_z_roll_preserves_tcp_z_axis() -> None:
@@ -55,6 +76,58 @@ def test_local_tcp_z_roll_preserves_tcp_z_axis() -> None:
     rolled_z = rolled.waypoints[0].quaternion.rotate_vector((0.0, 0.0, 1.0))
     assert rolled_z == original_z
     assert rolled.waypoints[0].quaternion != original.waypoints[0].quaternion
+
+
+def test_pose_selection_maximizes_clearance_without_preferring_small_roll(monkeypatch) -> None:
+    clearances = {
+        -90.0: 10.0,
+        -75.0: 11.0,
+        -60.0: 12.0,
+        -45.0: 13.0,
+        -30.0: 20.0,
+        -15.0: 21.0,
+        0.0: 22.0,
+        15.0: 23.0,
+        30.0: 40.0,
+        45.0: 50.0,
+        60.0: 60.0,
+        75.0: 70.0,
+        90.0: 80.0,
+    }
+
+    def fake_evaluate(*_args, **kwargs):
+        roll_degrees = float(_args[6])
+        return PoseTrial(
+            name=robot_pose_avoidance.pose_name(roll_degrees),
+            roll_degrees=roll_degrees,
+            validation_status="validated-clear",
+            accepted=True,
+            sampled_waypoints=1,
+            ik_failures=0,
+            collision_count=0,
+            collision_links=(),
+            minimum_clearance_mm=clearances[roll_degrees],
+            required_clearance_mm=float(kwargs["required_clearance_mm"]),
+            configuration_count=1,
+            max_joint_jump_degrees=0.0,
+            min_abs_j5_degrees=90.0,
+            message="sampled waypoints validated",
+        )
+
+    monkeypatch.setattr(robot_pose_avoidance, "evaluate_robot_pose", fake_evaluate)
+    selection = select_robot_pose(
+        _path(),
+        None,
+        WorkpiecePlacement(),
+        RobotConfiguration(),
+        JointState([0.0] * 6),
+        None,
+        collision_mesh=CollisionMesh([]),
+    )
+
+    assert selection.selected_roll_degrees == 90.0
+    assert selection.selected_minimum_clearance_mm == 80.0
+    assert selection.status == "alternative-validated"
 
 
 def test_minimum_robot_clearance_subtracts_experimental_link_radius() -> None:

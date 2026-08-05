@@ -4,7 +4,7 @@ This is the project-specific offline workspace for the large base-casting
 polishing study. For agent handoff rules, read `AGENTS.md`. For algorithm
 principles, read `PRINCIPLES.md`.
 
-## Current avoidance and result behavior (2026-07-22)
+## Current avoidance and result behavior (2026-08-05)
 
 - Turntable input accepts arbitrary comma-separated angles; each value is used
   as the actual model/workobject RZ.
@@ -18,6 +18,13 @@ principles, read `PRINCIPLES.md`.
   avoidance paths remain available for diagnosis but do not enter
   `optimal_paths`; the compact `robot_avoidance_trials.csv` states the selected
   roll, sampled interference result, clearance, joint jump, and reason.
+- Avoidance regions select the validated roll and installation pose with the
+  largest sampled minimum robot clearance. TCP roll magnitude and ordinary
+  world-Y/world-X scores do not rank avoidance candidates.
+- Avoidance evaluates 13 constant whole-path rolls from -90 to +90 degrees in
+  15-degree steps. Importing a valid `.rsc.json` uses its
+  configured per-link envelopes; without an override the runner uses a uniform
+  100 mm link-radius fallback and records `uniform-radius-links`.
 - After a successful UI run, the generated result directory opens
   automatically. A folder-open failure does not change the calculation result.
 
@@ -173,8 +180,9 @@ split-scanline 后直接复用投影扫描轴建立 cells。完整限制见 `HOL
 未分区的 `1/2/3` 会把整个所选加工面直接作为支撑面；`1-1/3-2` 等 patch 会从路径
 命中点恢复更大的支撑面，同时强制保留其源加工面。黄色加工 cell 不允许同时进入
 红色墙体集合。
-范围外模型不进入本轮墙体网格，不按朝上/朝下过滤。正式 runner 仍执行现有姿态库、
-数值 IK/FK、抽样碰撞和间隙筛查；本次墙体范围功能没有改变这些规则。
+范围外模型不进入本轮墙体网格，不按朝上/朝下过滤。正式 runner 对有效姿态和安装位置
+均按“抽样最小机械臂净间隙最大”选择；TCP roll 大小和普通区域的 world-Y/world-X 评分
+不参与避障区域排序。间隙完全相同时保留固定枚举/扫描顺序。
 
 转台角度不再使用固定预设。实验 UI 的“转台”输入框可填写单个角度 `270`，也可填写
 多个角度 `0,180` 或范围 `0-30-330`；逗号列表按输入顺序运行，范围格式依次为

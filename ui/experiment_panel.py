@@ -81,7 +81,9 @@ class ExperimentPanel(QWidget):
         self.region_count = QLabel("regions: -")
         self.robot_config_button = QPushButton("导入杆系配置")
         self.robot_config_label = QLabel("杆系: 项目内配置")
-        self.robot_config_label.setToolTip("未导入独立 .rsc.json；避障使用输入项目中的杆系配置和实验细杆模型。")
+        self.robot_config_label.setToolTip(
+            "未导入独立 .rsc.json；避障使用输入项目中的杆系配置和统一 1000 mm 半径包络。"
+        )
 
         self.partition_regions = QLineEdit("")
         self.partition_regions.setPlaceholderText("留空=当前唯一region")
@@ -158,8 +160,6 @@ class ExperimentPanel(QWidget):
         third_row = QHBoxLayout()
         third_row.setContentsMargins(0, 0, 0, 0)
         third_row.addWidget(self.robotstudio_button)
-        third_row.addWidget(QLabel("每个最优面生成工作站；场景安装位置与 RAPID 工件坐标相互独立，按面顺序验证"))
-        third_row.addWidget(QLabel("快速预览仅显示几何；正式实验执行避障 IK/FK，最终仍需 ABB/RobotStudio 验证"))
         third_row.addStretch(1)
         layout.addLayout(third_row)
         layout.addWidget(self.preview, 1)
@@ -219,6 +219,9 @@ class ExperimentPanel(QWidget):
             QMessageBox.warning(self, "杆系配置导入失败", str(exc))
             return
 
+        self._apply_robot_config_override(override)
+
+    def _apply_robot_config_override(self, override) -> None:
         self._robot_config_override = override
         self.robot_config_path = override.path
         envelope_text = ", ".join(

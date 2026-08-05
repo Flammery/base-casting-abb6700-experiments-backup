@@ -292,10 +292,17 @@
 
 ## 避障结果是 `fallback-unverified`
 
-- 表示五个姿态都未通过内部代表点筛查。快速预览可显示原 base-y 供诊断；正式 runner
+- 表示 13 个姿态都未通过内部代表点筛查。快速预览可显示原 base-y 供诊断；正式 runner
   会将该位置 deferred，不生成 candidate/optimal 避障路线。
 - 查看 `robot_avoidance_trials.csv` 的 IK、collision、configuration、joint jump 和 J5 字段。
 - 当前不含工具/环境/自碰撞/扫掠体；即使显示 validated，也必须进入 RobotStudio 验证。
+
+## `.rsc.json` 缺失、无效或未导入
+
+- 已保存文件位于 `C:\Users\21093\Desktop\p1\src\ABB 6700 Style.rsc.json`，可在实验 UI
+  手动导入，或通过 CLI `--robot-config <path>` 指定。
+- 未导入时允许继续运行，并使用所有杆段统一半径 100 mm 的回退模型。
+- 显式选择了无效文件时仍会报错，应修复或重新选择配置。
 
 ## 支撑面生长错误或绿色区域进入墙体
 

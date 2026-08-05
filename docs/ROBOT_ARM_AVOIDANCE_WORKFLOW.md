@@ -8,7 +8,7 @@ for explicitly selected regions only:
 ```text
 final geometric path
   -> support-surface recovery and obstacle mesh
-  -> TCP local-Z rolls [0,+15,-15,+30,-30]
+  -> TCP local-Z rolls [-90,-75,...,75,90]（间隔 15°）
   -> sampled numerical IK seeded from the previous successful solution
   -> actual joint-jump and J5 checks
   -> FK robot-link collision and sampled clearance
@@ -45,9 +45,9 @@ RobotStudio 或真实设备的安全验证。
 ## 范围
 
 - 默认工具 TCP 标定和工具结构正确；当前碰撞只分析 ABB 机械臂杆段与工件。
-- 未导入独立杆系配置时，试验把每段机械臂简化为半径 `5 mm`、额外间隙 `0 mm`
-  的细中心杆。通过实验 UI“导入杆系配置”选择主程序导出的 `.rsc.json` 后，IK/FK
-  使用其 MDH、关节限位和 seed，碰撞使用每段配置包络的近似半径。
+- 通过实验 UI 或 CLI 显式导入有效 `.rsc.json` 后，IK/FK 使用其 MDH、关节限位和
+  seed，碰撞使用每段配置包络的近似半径。未导入时继续使用项目内机器人配置，但
+  所有碰撞杆段使用统一半径 100 mm 的回退。
 - 配置包络仍是围绕杆系线段的胶囊近似，不是 ABB CAD 外壳；这是实验检测模型，
   不是安全认证模型。
 - 不包含工具实体、自碰撞、底座、地轨、转台、环境设备和运动段 swept volume。
@@ -69,21 +69,23 @@ region/patch selector
   -> 以最终路径 waypoint.face_id 为种子恢复完整支撑面
   -> 从工件网格排除支撑面，剩余面作为墙体障碍网格
   -> 固定整条路径的 TCP local-Z roll 候选
-     [0, +15, -15, +30, -30] deg
+     [-90, -75, ..., 75, 90] deg（间隔 15°）
   -> 每个候选均匀抽取最多 7 个代表点
   -> 数值 IK + J1/J4/J6 构型连续性
   -> 最大关节跳变 <= 40 deg，min |J5| >= 6 deg
-  -> 导入时使用配置包络；未导入时使用 ABB 5 mm 中心杆
+  -> 已导入时使用配置包络；未导入时使用统一 100 mm 半径
   -> 与墙体障碍网格做碰撞和最小间隙粗筛
   -> 抽样最小间隙 >= 默认 5 mm 安全阈值
-  -> 选择 abs(TCP local-Z roll) 最小的通过者
-  -> 避障区域按相同规则比较安装位置，不再使用 base-Y 评分
+  -> 在通过者中选择抽样最小机械臂净间隙最大的 roll
+  -> 避障区域按相同的最大间隙规则比较安装位置，不使用 roll 或 base-Y 评分
 ```
 
 局部 Z roll 不改变 TCP 位置或 `TCP +Z = -surface normal`，只改变 TCP X/Y 和
 机械臂腕部绕法向的构型。若所有候选均失败，状态为 `fallback-unverified`：快速预览
 和正式 runner 都可保留原 `base_y` 几何路径供诊断；正式 runner 仍会把它写入
 `candidates/`，但会在选择最优路径前将其过滤，禁止进入 `optimal_paths/`。
+若多个有效 roll 或安装位置的抽样最小间隙完全相同，则保留固定姿态库/扫描顺序中的
+第一个，以保证输出可复现；roll 绝对值不作为并列或次级评分。
 
 支撑面恢复使用网格邻接区域生长。候选三角形必须同时满足局部法向夹角、相对种子
 参考法向和参考平面距离阈值；墙面、明显圆角和台阶会停止生长。“避障设置”弹窗

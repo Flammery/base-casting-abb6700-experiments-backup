@@ -41,7 +41,7 @@ def test_ordinary_region_uses_world_x_only_when_world_y_is_tied() -> None:
     assert choose_best_by_region(rows)[0] is rows[1]
 
 
-def test_avoidance_region_ignores_base_y_and_minimizes_roll_after_clearance_filter() -> None:
+def test_avoidance_region_ignores_base_y_and_maximizes_clearance_regardless_of_roll() -> None:
     rows = [
         {
             "region": 1,
@@ -65,7 +65,7 @@ def test_avoidance_region_ignores_base_y_and_minimizes_roll_after_clearance_filt
         },
     ]
 
-    assert choose_best_by_region(rows)[0] is rows[0]
+    assert choose_best_by_region(rows)[0] is rows[1]
 
 
 def test_avoidance_equal_roll_uses_larger_clearance_without_world_y() -> None:
@@ -93,6 +93,29 @@ def test_avoidance_equal_roll_uses_larger_clearance_without_world_y() -> None:
     ]
 
     assert choose_best_by_region(rows)[0] is rows[1]
+
+
+def test_avoidance_equal_clearance_retains_stable_scan_order_without_roll_ranking() -> None:
+    rows = [
+        {
+            "region": 1,
+            "avoidance_selected": True,
+            "avoidance_status": "alternative-validated",
+            "avoidance_roll_degrees": 30.0,
+            "avoidance_min_clearance_mm": 20.0,
+            "score_max_abs_world_y": 1000.0,
+        },
+        {
+            "region": 1,
+            "avoidance_selected": True,
+            "avoidance_status": "baseline-validated",
+            "avoidance_roll_degrees": 0.0,
+            "avoidance_min_clearance_mm": 20.0,
+            "score_max_abs_world_y": 1.0,
+        },
+    ]
+
+    assert choose_best_by_region(rows)[0] is rows[0]
 
 
 def test_not_evaluated_avoidance_region_uses_world_y_policy() -> None:

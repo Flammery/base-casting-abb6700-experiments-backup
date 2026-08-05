@@ -24,14 +24,16 @@
    关节跳变很小并得到 `validated-clear`。
 4. 构造超过 40°的实际关节跳变，确认得到 `joint-discontinuous`；不要用
    confdata 元组变化替代此检查。
-5. 避障区域确认五个 local-Z roll 都写入精简的
+5. 避障区域确认从 `-90°` 到 `+90°`、间隔 `15°` 的 13 个 local-Z roll 都写入精简的
    `robot_avoidance_trials.csv`，且包含 selected/status/interference/clearance/
    joint-jump/reason。
-6. `ik-unresolved` 或支撑面恢复失败但几何非空的路径应保留在候选记录，且
+6. 同一安装位置有多个 validated roll 时，确认选择抽样最小净间隙最大的 roll；不同
+   安装位置之间也选择抽样最小净间隙最大的候选，不按 roll 或 world-Y/world-X 排序。
+7. `ik-unresolved` 或支撑面恢复失败但几何非空的路径应保留在候选记录，且
    不得进入 `optimal_paths`；普通区域先按 world-Y、并列时再按 world-X 进入最优选择。
-7. 检查抽样 IK/FK、连杆碰撞和最小间隙结果后，仍必须在 RobotStudio验证
+8. 检查抽样 IK/FK、连杆碰撞和最小间隙结果后，仍必须在 RobotStudio验证
    完整路径、工具、环境、自碰撞和 ABB控制器构型。
-8. UI实验成功后应自动打开本次结果目录；失败进程不打开，Explorer 启动
+9. UI实验成功后应自动打开本次结果目录；失败进程不打开，Explorer 启动
    失败只写状态、不改变实验完成结果。
 
 ## 自动测试
@@ -52,8 +54,9 @@ C:\Users\21093\Desktop\p1\.venv\Scripts\python.exe -m pytest tests -q
 - 输出目录日期和长度；
 - 项目输入优先级。
 - region/patch selector 规范化、自动/手动 patch 标签恢复和 local-Z roll 轴保持；
-- 通用碰撞默认使用配置的实际包络半径；避障算法试验 summary 必须明确记录
-  `thin-centerline-links`、5 mm 半径和 `use_configured_segment_radius=false`。
+- 导入 `.rsc.json` 时 summary 必须记录 `configured-link-envelopes` 和配置文件路径；
+  未导入时必须记录 `uniform-radius-links`、统一半径 100 mm 和
+  `use_configured_segment_radius=false`。
 
 ## 固定人工验收流程
 
@@ -78,7 +81,7 @@ C:\Users\21093\Desktop\p1\.venv\Scripts\python.exe -m pytest tests -q
 14. 导入 RobotStudio，低速或单步检查可达性、构型连续、孔边间隙和实际碰撞。
 15. 分别输入 `1` 与 `1-1`，确认前者命中源 region 的全部 patches，后者只命中一个
     patch；未输入的区域候选仍为 `avoidance_status=not-requested`。
-16. 检查 `robot_avoidance_trials.csv` 五个 roll 均有记录，`summary.json` 的 requested、
+16. 检查 `robot_avoidance_trials.csv` 13 个 roll 均有记录，`summary.json` 的 requested、
     resolved labels、status counts 一致；`fallback-unverified` 不得显示为已安全。
 17. 快速预览确认黄色 seed 位于实际 patch，绿色支撑面覆盖 patch 所在完整面且没有越过
     圆角进入墙体，红色包含需要绕开的腔体墙；核对 status 中的支撑面 cell 数。

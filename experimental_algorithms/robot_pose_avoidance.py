@@ -25,8 +25,8 @@ from robot_studio_qt.tools.reachability.collision import (
 )
 
 
-POSE_ROLL_DEGREES = (0.0, 15.0, -15.0, 30.0, -30.0)
-EXPERIMENT_LINK_RADIUS_MM = 5.0
+POSE_ROLL_DEGREES = (-90.0, -75.0, -60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0)
+EXPERIMENT_LINK_RADIUS_MM = 100.0
 EXPERIMENT_CLEARANCE_MM = 0.0
 EXPERIMENT_USE_SEGMENT_RADIUS = False
 DEFAULT_MIN_CLEARANCE_MM = 5.0
@@ -136,11 +136,12 @@ def select_robot_pose(
     collision_settings: CollisionSettings | None = None,
     collision_mesh: CollisionMesh | None = None,
 ) -> PoseSelection:
-    """Select the smallest validated TCP roll, or retain baseline for diagnosis.
+    """Select the validated TCP roll with the largest sampled clearance.
 
     A fallback path remains geometrically valid and can be exported for
     RobotStudio follow-up, but ``validated`` stays false so it cannot become an
-    internally validated optimal avoidance result.
+    internally validated optimal avoidance result. Exact clearance ties retain
+    the deterministic pose-library order.
     """
 
     settings = collision_settings or CollisionSettings(
@@ -172,7 +173,14 @@ def select_robot_pose(
     accepted_indices = [index for index, trial in enumerate(trials) if trial.accepted]
     if not accepted_indices:
         return PoseSelection(path, fallback_selection_status(trials), trials[0].name, 0.0, tuple(trials))
-    accepted_index = min(accepted_indices, key=lambda index: (abs(trials[index].roll_degrees), index))
+    accepted_index = max(
+        accepted_indices,
+        key=lambda index: (
+            float(trials[index].minimum_clearance_mm)
+            if trials[index].minimum_clearance_mm is not None
+            else -math.inf
+        ),
+    )
     selected_trial = trials[accepted_index]
     status = "baseline-validated" if accepted_index == 0 else "alternative-validated"
     return PoseSelection(

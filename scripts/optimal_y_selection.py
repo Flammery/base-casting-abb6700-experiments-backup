@@ -24,10 +24,11 @@ def choose_best_by_region(candidate_rows: Iterable[dict]) -> list[dict]:
 
     Ordinary and hole-aware candidates minimize the historical world-Y score,
     then use the corresponding world-X score only when world-Y is tied.
-    Internally validated avoidance candidates minimize absolute TCP roll and
-    then maximize sampled clearance. Unresolved avoidance rows may remain in
-    ``all_candidates.csv`` for RobotStudio diagnosis, but the configurable
-    runner filters them before calling this selector for optimal output.
+    Internally validated avoidance candidates maximize their sampled minimum
+    robot clearance; TCP roll is not a ranking metric. Unresolved avoidance
+    rows may remain in ``all_candidates.csv`` for RobotStudio diagnosis, but
+    the configurable runner filters them before calling this selector for
+    optimal output.
     """
     by_region: dict[int, list[dict]] = {}
     for row in candidate_rows:
@@ -44,12 +45,9 @@ def choose_best_by_region(candidate_rows: Iterable[dict]) -> list[dict]:
         ]
         if avoidance_rows:
             best_rows.append(
-                min(
+                max(
                     avoidance_rows,
-                    key=lambda row: (
-                        abs(float(row["avoidance_roll_degrees"])),
-                        -float(row["avoidance_min_clearance_mm"]),
-                    ),
+                    key=lambda row: float(row["avoidance_min_clearance_mm"]),
                 )
             )
             continue

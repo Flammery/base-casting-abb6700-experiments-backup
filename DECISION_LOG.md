@@ -1,5 +1,69 @@
 # Decision Log
 
+## D033 Roll range and uniform fallback value correction
+
+- Date: 2026-08-05
+- Status: Accepted; supersedes D031's seven-angle value and D032's 1000 mm value
+- Decision: use 13 whole-path TCP local-Z rolls from -90 to +90 degrees in
+  15-degree steps. When `.rsc.json` is not imported, use a uniform 100 mm link
+  radius. No selection, IK/FK, collision, or continuous-motion logic changes.
+
+## D032 Optional robot envelope uses a 1000 mm uniform fallback
+
+- Date: 2026-08-05
+- Status: Accepted for experiment; supersedes D031's automatic/required envelope rule only
+- Decision: `.rsc.json` is optional again. When explicitly imported, use its MDH,
+  seed, limits, and configured per-link capsule radii. Without an override, keep
+  the former uniform-link fallback behavior but change its radius from 5 mm to
+  1000 mm for every segment (`use_segment_radius=False`).
+- Consequence: with the separate default 5 mm required net clearance, an
+  unconfigured candidate needs approximately 1005 mm centerline-to-wall distance.
+  This is intentionally very conservative and may eliminate most candidates.
+- Unchanged: the seven-roll library, maximum sampled-minimum-clearance ranking,
+  discrete sampling, and RobotStudio validation boundary.
+- Related code/tests: `experimental_algorithms/robot_pose_avoidance.py`,
+  `scripts/configurable_experiment_runner.py`, `ui/experiment_panel.py`, and
+  `tests/test_robot_pose_avoidance.py`.
+
+## D031 Seven-roll avoidance requires the saved ABB envelope
+
+- Date: 2026-08-05
+- Status: Seven-roll portion accepted; automatic/required envelope portion superseded by D032
+- Decision: expand the whole-path TCP local-Z roll library to
+  `[0,+15,-15,+30,-30,+45,-45]`. Each trial still applies one constant roll to
+  the complete region/patch path; D030's maximum sampled-minimum-clearance
+  ranking is unchanged.
+- Robot envelope: an avoidance run automatically uses
+  `src/ABB 6700 Style.rsc.json` unless the UI/CLI supplies another valid
+  `.rsc.json`. Missing or invalid configuration is a hard error for selected
+  avoidance regions; do not fall back to the 5 mm thin-link model.
+- Scope: the configured per-link radii are still simplified centerline capsules,
+  not ABB CAD shells or continuous swept-volume validation.
+- Related code/tests: `experimental_algorithms/robot_pose_avoidance.py`,
+  `scripts/robot_config_override.py`, `scripts/configurable_experiment_runner.py`,
+  `ui/experiment_panel.py`, `tests/test_robot_pose_avoidance.py`, and
+  `tests/test_robot_config_override.py`.
+
+## D030 Avoidance ranking maximizes sampled minimum clearance
+
+- Date: 2026-08-05
+- Status: Accepted for experiment; supersedes the avoidance-ranking portions of D014 and D016
+- Decision: After IK, joint-continuity, J5, collision, and minimum-clearance hard
+  conditions pass, select the TCP local-Z roll with the largest sampled minimum
+  robot clearance at each installation pose. Across Y/XYZ/RZ/feed candidates for
+  the same avoidance region, select the candidate with the largest sampled minimum
+  clearance. TCP roll magnitude and ordinary world-Y/world-X scores do not rank
+  avoidance candidates.
+- Ties: exact clearance ties retain the fixed pose-library or scan order. This is
+  deterministic output behavior, not an additional physical score.
+- Unchanged: only `baseline-validated` and `alternative-validated` avoidance rows
+  may enter `optimal_paths`; unresolved or failed rows remain diagnostic candidates.
+  The result is still a sampled simplified-envelope screen and not a RobotStudio or
+  real-cell safety certificate.
+- Related code/tests: `experimental_algorithms/robot_pose_avoidance.py`,
+  `scripts/optimal_y_selection.py`, `scripts/configurable_experiment_runner.py`,
+  `tests/test_robot_pose_avoidance.py`, and `tests/test_optimal_y_selection.py`.
+
 ## D029 RobotWare 6 RAPID 元数据兼容与插件失败恢复
 
 - 日期：2026-08-01

@@ -86,9 +86,10 @@ patch.
   Lightweight selector for dual-robot rail experiments. Ordinary and hole-aware
   regions minimize `max(abs(world_y))` over processing waypoints and use
   `max(abs(world_x))` only to break a world-Y tie. Internally
-  validated avoidance rows instead minimize absolute TCP local-Z roll and then
-  maximize sampled robot clearance. Unresolved avoidance rows remain available
-  for RobotStudio diagnosis but do not enter optimal output.
+  validated avoidance rows instead maximize sampled minimum robot clearance;
+  TCP local-Z roll is not a ranking metric. Exact-clearance ties retain stable
+  scan order. Unresolved avoidance rows remain available for RobotStudio
+  diagnosis but do not enter optimal output.
 
 - `scripts/configurable_experiment_runner.py`
   Stable configurable CLI/UI runner. It scans the user-supplied installation
@@ -107,12 +108,17 @@ patch.
   the exported robot configuration/seed and enables configured segment radii.
 
 - `scripts/region_selectors.py` and `experimental_algorithms/robot_pose_avoidance.py`
-  Region selectors and the five-entry TCP-Z roll library are active only for
+  Region selectors and the 13-entry TCP-Z roll library (`-90..90` by 15 degrees) are active only for
   user-selected avoidance regions. Each sampled waypoint uses the previous
   successful joint solution as its next IK seed; confdata quadrant changes are
   diagnostic only, while actual joint jumps, J5 margin, FK collision, and
   clearance decide acceptance. Do not present this sampled result as ABB
   interference validation.
+
+- Avoidance runs use configured per-link envelopes only after the user imports a
+  valid `.rsc.json`/passes `--robot-config`. Without an override, retain the
+  uniform fallback model with `EXPERIMENT_LINK_RADIUS_MM = 100` mm and record
+  `uniform-radius-links` in the summary.
 
 - `experimental_algorithms/support_surface_growth.py`
   Resolves support and constructs the local wall-selection volume. An unsplit
